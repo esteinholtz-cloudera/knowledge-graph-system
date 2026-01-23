@@ -1,0 +1,42 @@
+# Knowledge Graph System Configuration
+
+# LLM Configuration
+llm:
+  # Path to RAG chatbot project (relative or absolute)
+  # If None, will try to auto-detect
+  rag_project_path: null
+  
+  # Generation parameters
+  temperature: 0.3
+  max_new_tokens: 512
+  top_p: 0.85
+  top_k: 70
+  repetition_penalty: 1.07
+
+# Document Processing
+document:
+  chunk_size: 1000  # Words per chunk
+  overlap: 100       # Overlapping words between chunks
+
+# Storage Configuration
+storage:
+  knowledge_graphs_dir: "data/knowledge_graphs"
+  metadata_file: "data/metadata.json"
+  documents_dir: "data/documents"
+
+# n8n Server Configuration
+n8n:
+  host: "0.0.0.0"
+  port: 5000
+  debug: false
+
+# Extraction Configuration
+extraction:
+  # Entity extraction settings
+  entity_extraction:
+    enabled: true
+    
+  # Relationship extraction settings
+  relationship_extraction:
+    enabled: true
+
