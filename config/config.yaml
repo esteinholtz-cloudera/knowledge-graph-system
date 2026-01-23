@@ -23,7 +23,8 @@ storage:
   knowledge_graphs_dir: "data/knowledge_graphs"
   metadata_file: "data/metadata.json"
   documents_dir: "data/documents"
-
+  ontology_dir: "data/ontology" #TODO to be supported by the code
+  ontology_file: "data/ontology/ontology.ttl" #TODO to be supported by the code
 # n8n Server Configuration
 n8n:
   host: "0.0.0.0"
