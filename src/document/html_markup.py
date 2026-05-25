@@ -117,15 +117,12 @@ class HTMLMarkupGenerator:
         graph = Graph()
         graph.parse(ttl_file_path, format='turtle')
         
-        # First pass: collect all entity URIs
+        # Collect only subjects that have a doc:sourceDocument triple —
+        # these are definitively entities, not predicates or ontology classes.
         entity_uri_set = set()
-        for subject, predicate, obj in graph:
-            # Check if subject is an entity (in KG namespace)
+        for subject, predicate, obj in graph.triples((None, DOC.sourceDocument, None)):
             if str(subject).startswith(str(KG)):
                 entity_uri_set.add(subject)
-            # Check if object is an entity (in KG namespace)
-            if str(obj).startswith(str(KG)):
-                entity_uri_set.add(obj)
         
         # Second pass: extract entities with their types
         for entity_uri in entity_uri_set:
@@ -376,21 +373,11 @@ class HTMLMarkupGenerator:
         """
         if not text:
             return text
-        
-        # Replace double or more newlines with paragraph breaks
-        # Split by double newlines first
-        paragraphs = re.split(r'\n\n+', text)
-        
-        # Process each paragraph: replace single newlines with <br>
-        formatted_paragraphs = []
-        for para in paragraphs:
-            if para.strip():
-                # Replace single newlines with <br>
-                formatted_para = re.sub(r'\n', '<br>', para)
-                formatted_paragraphs.append(formatted_para)
-        
-        # Join paragraphs with </p><p>
-        return '</p><p>'.join(formatted_paragraphs)
+        # Use double <br> for paragraph breaks — avoids broken <p> nesting
+        # when this result is embedded inside an outer <p> in the template.
+        text = re.sub(r'\n\n+', '<br><br>', text)
+        text = re.sub(r'\n', '<br>', text)
+        return text
     
     def _generate_html_document(
         self,
@@ -600,7 +587,7 @@ class HTMLMarkupGenerator:
         {entity_list_html}
         
         <div class="document-content">
-            <p>{marked_text}</p>
+            <div class="document-text">{marked_text}</div>
         </div>
     </div>
 </body>

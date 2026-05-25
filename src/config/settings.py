@@ -36,10 +36,10 @@ class LLMSettings(BaseModel):
     # Recommended for qwen3 and other thinking models to avoid token exhaustion.
     disable_thinking: bool = False
 
-    def resolved_base_url(self) -> str:
+    def resolved_base_url(self) -> Optional[str]:
         if self.base_url:
             return self.base_url.rstrip("/")
-        return DEFAULT_BASE_URLS[self.provider]
+        return DEFAULT_BASE_URLS.get(self.provider)  # None for anthropic/gemini
 
     def resolved_api_key_env(self) -> Optional[str]:
         if self.api_key_env is not None:
@@ -92,6 +92,8 @@ def load_config(config_path: Optional[str] = None) -> AppSettings:
         config_path = str(root / "config" / "config.yaml")
     path = Path(config_path)
     if not path.exists():
+        import logging
+        logging.getLogger(__name__).warning("config.yaml not found at %s — using defaults", path)
         return AppSettings()
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
