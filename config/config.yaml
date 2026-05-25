@@ -3,10 +3,10 @@
 # LLM Configuration
 llm:
   # ollama | lmstudio | openai | anthropic | gemini
-  provider: ollama
-  model: llama3.2
+  provider: lmstudio
+  model: qwen3-14b
   # Optional override (defaults: Ollama http://localhost:11434/v1, LM Studio :1234/v1)
-  base_url: null
+  base_url: http://127.0.0.1:1234/v1
   # Environment variable for API key (null = provider default; Ollama/LM Studio often need none)
   api_key_env: null
   timeout_seconds: 120

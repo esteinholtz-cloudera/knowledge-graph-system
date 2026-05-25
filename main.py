@@ -1,4 +1,4 @@
-'"""Main CLI entry point for knowledge graph system."""
+"""Main CLI entry point for knowledge graph system."""
 import argparse
 import sys
 from pathlib import Path

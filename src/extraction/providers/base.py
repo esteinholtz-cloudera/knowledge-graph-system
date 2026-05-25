@@ -11,7 +11,8 @@ class LLMProviderBase(ABC):
         self,
         prompt: str,
         stop_words: Optional[List[str]] = None,
-        temperature: float = 0.7,
-        max_new_tokens: int = 512,
+        temperature: float = 0.3,
+        max_new_tokens: int = 1024,
+        system_prompt: Optional[str] = None,
     ) -> str:
         """Generate text from a prompt."""

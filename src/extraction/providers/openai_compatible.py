@@ -25,17 +25,23 @@ class OpenAICompatibleProvider(LLMProviderBase):
         self,
         prompt: str,
         stop_words: Optional[List[str]] = None,
-        temperature: float = 0.7,
-        max_new_tokens: int = 512,
+        temperature: float = 0.3,
+        max_new_tokens: int = 1024,
+        system_prompt: Optional[str] = None,
     ) -> str:
         url = f"{self.base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
         body = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "temperature": temperature,
             "max_tokens": max_new_tokens,
         }
