@@ -21,7 +21,7 @@ class RelationshipExtractor:
         Args:
             llm_client: LLM client instance. If None, creates a new one.
         """
-        self.llm_client = llm_client or LLMClient()
+        self.llm_client = llm_client or LLMClient.from_config()
     
     def extract(self, text: str, entities: Optional[List[str]] = None) -> List[Dict]:
         """

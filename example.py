@@ -92,7 +92,7 @@ if __name__ == '__main__':
         example_extraction()
     except Exception as e:
         print(f"\nError: {e}")
-        print("\nNote: This example requires the RAG LLM to be set up.")
-        print("Make sure the RAG chatbot project is accessible.")
+        print("\nNote: Configure LLM in config/config.yaml (ollama, lmstudio, openai, etc.).")
+        print("For live calls, ensure the provider is running or API keys are set.")
         sys.exit(1)
 
