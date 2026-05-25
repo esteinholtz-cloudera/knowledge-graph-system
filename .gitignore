@@ -37,6 +37,7 @@ ENV/
 data/knowledge_graphs/*.ttl
 data/metadata.json
 data/documents/*
+data/ontology/ontology_proposed.ttl
 
 # Keep directory structure
 !data/knowledge_graphs/.gitkeep
