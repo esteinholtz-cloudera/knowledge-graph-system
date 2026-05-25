@@ -127,12 +127,14 @@ class TurtleWriter:
                 graph.add((subj_uri, DOC.sourceDocument, doc_uri))
                 written_entity_uris.add(subj_uri)
 
-        # Emit rdf:type for every entity that was written, using the entity_types map.
+        # Ensure every extracted entity has a sourceDocument link and rdf:type,
+        # even if it never appeared as a subject/object in any relationship triple.
         for name, canonical_type in entity_types.items():
             uri = create_entity_uri(name)
-            if uri in written_entity_uris:
-                type_uri = self.ontology_manager.get_ontology_class_uri(canonical_type)
-                graph.add((uri, RDF.type, type_uri))
+            graph.add((uri, DOC.sourceDocument, doc_uri))
+            type_uri = self.ontology_manager.get_ontology_class_uri(canonical_type)
+            graph.add((uri, RDF.type, type_uri))
+            written_entity_uris.add(uri)
 
         # Persist KG file.
         filepath = self.output_dir / f"{document_id}.ttl"
