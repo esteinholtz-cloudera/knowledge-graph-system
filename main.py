@@ -14,7 +14,7 @@ from src.storage.metadata_store import MetadataStore
 _PROJECT_ROOT = Path(__file__).parent
 
 
-def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs"):
+def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs", max_chunks: int = None):
     """Process a document and extract knowledge graph."""
     print(f"Processing document: {file_path}")
 
@@ -26,7 +26,11 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
     print(f"Word count:  {doc_data['word_count']}")
 
     chunks = processor.chunk_text(doc_data['text'])
-    print(f"Split into {len(chunks)} chunks")
+    if max_chunks and len(chunks) > max_chunks:
+        print(f"Split into {len(chunks)} chunks (limiting to first {max_chunks})")
+        chunks = chunks[:max_chunks]
+    else:
+        print(f"Split into {len(chunks)} chunks")
 
     entity_extractor = EntityExtractor()
     relationship_extractor = RelationshipExtractor()
@@ -159,6 +163,7 @@ def main():
     p = subparsers.add_parser('process', help='Process a document')
     p.add_argument('file_path')
     p.add_argument('--output-dir', default='data/knowledge_graphs')
+    p.add_argument('--max-chunks', type=int, default=None, help='Limit number of chunks processed (for testing)')
 
     # server
     s = subparsers.add_parser('server', help='Start n8n API server')
@@ -174,7 +179,7 @@ def main():
     args = parser.parse_args()
 
     if args.command == 'process':
-        result = process_and_extract(args.file_path, args.output_dir)
+        result = process_and_extract(args.file_path, args.output_dir, max_chunks=args.max_chunks)
         print("\n" + "=" * 50)
         print("Processing complete!")
         print("=" * 50)

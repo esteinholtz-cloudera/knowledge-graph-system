@@ -18,7 +18,7 @@ llm:
 
 # Document Processing
 document:
-  chunk_size: 1000
+  chunk_size: 3000
   overlap: 100
 
 # Storage Configuration
