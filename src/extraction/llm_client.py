@@ -1,8 +1,7 @@
 """LLM client configured from config.yaml."""
-from pathlib import Path
 from typing import List, Optional
 
-from src.config.settings import AppSettings, LLMSettings, load_config
+from src.config.settings import LLMSettings, load_config
 from src.extraction.providers.base import LLMProviderBase
 from src.extraction.providers.factory import create_provider
 
@@ -28,6 +27,7 @@ class LLMClient:
         stop_words: Optional[List[str]] = None,
         temperature: Optional[float] = None,
         max_new_tokens: Optional[int] = None,
+        progress_label: Optional[str] = None,
         # Legacy kwargs kept for backward compatibility (ignored)
         top_p: float = 0.85,
         top_k: int = 70,
@@ -40,4 +40,5 @@ class LLMClient:
             stop_words=stop_words,
             temperature=temperature if temperature is not None else self._settings.temperature,
             max_new_tokens=max_new_tokens if max_new_tokens is not None else self._settings.max_new_tokens,
+            progress_label=progress_label,
         )

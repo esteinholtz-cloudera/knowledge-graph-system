@@ -1,6 +1,7 @@
 """Main CLI entry point for knowledge graph system."""
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from src.document.processor import DocumentProcessor
@@ -33,22 +34,46 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
     all_entities = []
     all_triples_set = set()  # deduplicate as (subject, predicate, object) tuples
     all_triples = []
+    total_chunks = len(chunks)
+    chunk_times: list = []
 
     for i, chunk in enumerate(chunks):
-        print(f"\nProcessing chunk {i+1}/{len(chunks)}...")
+        chunk_num = i + 1
+        # ETA based on average of completed chunks
+        if chunk_times:
+            avg = sum(chunk_times) / len(chunk_times)
+            remaining = avg * (total_chunks - i)
+            m, s = divmod(int(remaining), 60)
+            eta_str = f"  ETA ~{m}m{s:02d}s" if m else f"  ETA ~{s}s"
+        else:
+            eta_str = ""
 
-        entities = entity_extractor.extract(chunk)
+        print(f"\n{'─' * 50}")
+        print(f"  Chunk {chunk_num}/{total_chunks}{eta_str}")
+        print(f"{'─' * 50}")
+        chunk_start = time.monotonic()
+
+        entities = entity_extractor.extract(
+            chunk,
+            progress_label=f"chunk {chunk_num}/{total_chunks} · entities",
+        )
         all_entities.extend(entities)
-        print(f"  Extracted {len(entities)} entities")
+        print(f"  ✓ Entities:      {len(entities)}")
 
         entity_names = [e.get('entity', '') for e in entities if e.get('entity')]
-        triples = relationship_extractor.extract(chunk, entity_names)
+        triples = relationship_extractor.extract(
+            chunk,
+            entity_names,
+            progress_label=f"chunk {chunk_num}/{total_chunks} · relationships",
+        )
         for t in triples:
             key = (t.get('subject', ''), t.get('predicate', ''), t.get('object', ''))
             if key not in all_triples_set:
                 all_triples_set.add(key)
                 all_triples.append(t)
-        print(f"  Extracted {len(triples)} relationships")
+        elapsed = time.monotonic() - chunk_start
+        chunk_times.append(elapsed)
+        print(f"  ✓ Relationships: {len(triples)}  ({elapsed:.1f}s)")
 
     # Deduplicate entities — prefer a non-'Other' type if seen in any chunk.
     unique_entities: dict = {}

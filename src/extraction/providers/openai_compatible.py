@@ -1,37 +1,12 @@
 """OpenAI-compatible chat API (Ollama, LM Studio, OpenAI)."""
+import json
 import re
 import sys
-import threading
-import time
 from typing import List, Optional
 
 import httpx
 
 from .base import LLMProviderBase
-
-
-class _Ticker:
-    """Print a dot to stderr every `interval` seconds while a task runs."""
-
-    def __init__(self, interval: float = 3.0):
-        self._interval = interval
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-
-    def _run(self):
-        while not self._stop.wait(self._interval):
-            sys.stderr.write(".")
-            sys.stderr.flush()
-
-    def __enter__(self):
-        self._thread.start()
-        return self
-
-    def __exit__(self, *_):
-        self._stop.set()
-        self._thread.join()
-        sys.stderr.write("\n")
-        sys.stderr.flush()
 
 
 class OpenAICompatibleProvider(LLMProviderBase):
@@ -58,14 +33,13 @@ class OpenAICompatibleProvider(LLMProviderBase):
         temperature: float = 0.3,
         max_new_tokens: int = 1024,
         system_prompt: Optional[str] = None,
+        progress_label: Optional[str] = None,
     ) -> str:
         url = f"{self.base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        # Prepend /no_think to disable thinking mode on models that support it
-        # (e.g. qwen3). This prevents token exhaustion on the reasoning phase.
         effective_system = system_prompt or ""
         if self.disable_thinking and effective_system:
             effective_system = "/no_think\n" + effective_system
@@ -82,29 +56,52 @@ class OpenAICompatibleProvider(LLMProviderBase):
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_new_tokens,
+            "stream": True,
         }
         if stop_words:
             body["stop"] = stop_words
 
-        with _Ticker(), httpx.Client(timeout=self.timeout_seconds) as client:
-            response = client.post(url, json=body, headers=headers)
-            response.raise_for_status()
-            data = response.json()
+        label = f"[{progress_label}]" if progress_label else ""
+        content = ""
+        reasoning_content = ""
+        token_count = 0
 
-        choices = data.get("choices") or []
-        if not choices:
-            raise ValueError("LLM returned no choices")
-        message = choices[0].get("message") or {}
-        content = message.get("content") or ""
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            with client.stream("POST", url, json=body, headers=headers) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                        delta = chunk["choices"][0].get("delta", {})
+                        token = delta.get("content") or ""
+                        reasoning_token = delta.get("reasoning_content") or ""
+                        if token:
+                            content += token
+                            token_count += 1
+                        if reasoning_token:
+                            reasoning_content += reasoning_token
+                            token_count += 1
+                        pct = min(99, token_count * 100 // max_new_tokens)
+                        sys.stderr.write(f"\r{label} {pct:3d}%  ")
+                        sys.stderr.flush()
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
 
-        # Thinking models (e.g. qwen3) put reasoning in reasoning_content and
-        # the actual answer in content. If content is empty, fall back.
-        if not content.strip():
-            content = message.get("reasoning_content") or ""
+        sys.stderr.write(f"\r{label} 100%\n")
+        sys.stderr.flush()
 
-        # Strip <think>...</think> blocks that some models embed inline.
-        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        # Thinking models put answer in content, reasoning in reasoning_content.
+        # If content is empty, fall back to reasoning_content.
+        result = content.strip() or reasoning_content.strip()
 
-        if not content:
+        # Strip inline <think> blocks.
+        result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL).strip()
+
+        if not result:
             raise ValueError("LLM returned empty content")
-        return content
+        return result

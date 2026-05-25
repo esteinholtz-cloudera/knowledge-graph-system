@@ -20,7 +20,12 @@ class RelationshipExtractor:
     def __init__(self, llm_client: Optional[LLMClient] = None):
         self.llm_client = llm_client or LLMClient.from_config()
 
-    def extract(self, text: str, entities: Optional[List[str]] = None) -> List[Dict]:
+    def extract(
+        self,
+        text: str,
+        entities: Optional[List[str]] = None,
+        progress_label: Optional[str] = None,
+    ) -> List[Dict]:
         """
         Extract relationships from text.
 
@@ -38,6 +43,7 @@ class RelationshipExtractor:
                 stop_words=None,
                 max_new_tokens=2048,
                 temperature=0.3,
+                progress_label=progress_label,
             )
             return self._parse_triples(response)
         else:
@@ -48,6 +54,7 @@ class RelationshipExtractor:
                 stop_words=None,
                 max_new_tokens=2048,
                 temperature=0.3,
+                progress_label=progress_label,
             )
             return self._parse_combined(response)
 
