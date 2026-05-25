@@ -1,137 +1,160 @@
 # Knowledge Graph System
 
-A standalone system for generating and managing knowledge graphs from documents. Each knowledge graph is linked to a document and stored in Turtle (RDF) format. The system uses the existing RAG chatbot's LLM for extraction and integrates with n8n via custom nodes for agent-based orchestration.
+Generate knowledge graphs from documents: extract entities and relationships with an LLM, store them as Turtle (RDF), type entities against a local ontology (`rdf:type`), and produce HTML markup linked to the graph.
 
-## Features
+## Quick start
 
-- **Multi-format Document Processing**: Supports text, Markdown, PDF, and Word documents
-- **Entity Extraction**: Extract entities from documents using LLM
-- **Relationship Extraction**: Extract relationships between entities
-- **Turtle Format Storage**: Store knowledge graphs in RDF Turtle format (one file per document)
-- **n8n Integration**: HTTP API endpoints for n8n workflow orchestration
-- **Metadata Tracking**: Track document-to-knowledge graph mappings
+### 1. Install
 
-## Project Structure
-
-```
-knowledge-graph-system/
-├── src/
-│   ├── document/          # Document processing
-│   ├── extraction/        # Entity and relationship extraction
-│   ├── storage/           # Knowledge graph storage
-│   └── n8n/              # n8n integration
-├── config/                # Configuration files
-├── data/                  # Data directories
-│   ├── documents/         # Input documents
-│   ├── knowledge_graphs/ # Generated Turtle files
-│   └── metadata.json     # Document metadata
-├── pyproject.toml         # Project dependencies (uv)
-└── main.py               # CLI entry point
-```
-
-## Installation
-
-1. Install dependencies using uv:
 ```bash
 uv sync
 ```
 
-Or if you prefer pip:
-```bash
-pip install -e .
+### 2. Configure the LLM
+
+Edit [`config/config.yaml`](config/config.yaml). Default is local **Ollama**:
+
+```yaml
+llm:
+  provider: ollama    # ollama | lmstudio | openai | anthropic | gemini
+  model: llama3.2     # must match a model you have pulled / loaded
 ```
 
-2. Ensure the RAG chatbot project is accessible (for LLM integration):
-   - The system will try to auto-detect the RAG project
-   - Or specify the path in `config/config.yaml`
+| Provider | Typical setup |
+|----------|----------------|
+| `ollama` | Run Ollama; default API `http://localhost:11434/v1` |
+| `lmstudio` | Start a model in LM Studio; default `http://localhost:1234/v1` |
+| `openai` / `anthropic` / `gemini` | Set API key env var (see [`.env.example`](.env.example)) |
 
-## Usage
+Verify config (no LLM call):
 
-### CLI Usage
-
-Process a document and extract knowledge graph:
 ```bash
-python main.py process /path/to/document.pdf
+uv run python test/test_llm_config.py
 ```
 
-Start the n8n API server:
+Optional live check (Ollama running or API key set):
+
 ```bash
-python main.py server --port 5000
+uv run python test/test_llm_config.py --live
 ```
 
-### n8n API Endpoints
+### 3. Add a document to scan
 
-The server exposes the following endpoints:
+Put your text (or Markdown) here:
 
-- `GET /health` - Health check
-- `POST /process` - Process a document
-  ```json
-  {
-    "file_path": "/path/to/document",
-    "chunk_size": 1000,
-    "overlap": 100
-  }
-  ```
+```text
+data/documents/my-doc.txt
+```
 
-- `POST /extract/entities` - Extract entities from text
-  ```json
-  {
-    "text": "text to extract entities from"
-  }
-  ```
+Example content is fine for a first run—a few paragraphs with named entities (people, products, places).
 
-- `POST /extract/relationships` - Extract relationships from text
-  ```json
-  {
-    "text": "text to extract relationships from",
-    "entities": ["entity1", "entity2"]
-  }
-  ```
+### 4. Process the document
 
-- `POST /store` - Store knowledge graph
-  ```json
-  {
-    "document_id": "unique_id",
-    "triples": [
-      {"subject": "...", "predicate": "...", "object": "..."}
-    ],
-    "document_metadata": {...}
-  }
-  ```
+From the repo root:
 
-- `GET /metadata/<document_id>` - Get document metadata
-- `GET /metadata` - List all documents
+```bash
+uv run python main.py process data/documents/my-doc.txt
+```
 
-## Workflow
+The pipeline:
 
-1. **Document Ingestion**: Process document and extract text
-2. **Extraction**: Extract entities and relationships using LLM
-3. **Storage**: Convert to RDF format and save as Turtle file
-4. **Metadata**: Track document-KG mappings
+1. Builds a **knowledge graph** (`.ttl`) with entities, relationships, and `rdf:type` links to the ontology  
+2. Writes **HTML markup** with entities highlighted (`data/documents/my-doc_markup.html`)
+
+### 5. Check the outputs
+
+| What | Where | What to look for |
+|------|--------|------------------|
+| Knowledge graph | `data/knowledge_graphs/<hash>.ttl` | Triples plus `a ont:Person` (etc.) on entities |
+| HTML markup | `data/documents/my-doc_markup.html` | Open in a browser; entities highlighted with types |
+| Document index | `data/metadata.json` | Maps document hash → paths and timestamps |
+| Ontology | `data/ontology/ontology.ttl` | OWL classes (`ont:Person`, `ont:Technology`, …) |
+
+**Verify ontology typing** in the TTL file:
+
+```bash
+grep "a ont:" data/knowledge_graphs/*.ttl
+```
+
+You should see lines like `kg:Some_Entity a ont:Technology ;`.
+
+**Inspect the ontology** (classes and labels):
+
+```bash
+cat data/ontology/ontology.ttl
+```
+
+New entity types from extraction are added to this file automatically when needed.
+
+### 6. Optional: run without the full LLM
+
+If the LLM is not available, you can still validate storage and HTML from a sample graph:
+
+```bash
+uv run python test/test_ontology_integration.py
+```
+
+That writes a sample `.ttl` and HTML under `data/`.
+
+---
+
+## Project layout
+
+```
+knowledge-graph-system/
+├── config/config.yaml       # LLM, paths, chunking
+├── data/
+│   ├── documents/           # Input files + *_markup.html output
+│   ├── knowledge_graphs/    # Generated *.ttl per document
+│   ├── ontology/ontology.ttl
+│   └── metadata.json
+├── src/
+│   ├── config/              # Settings loader
+│   ├── document/            # Parsing, HTML markup
+│   ├── extraction/          # LLM entity/relationship extraction
+│   └── storage/             # Turtle writer, ontology manager
+└── main.py                  # CLI: process | server
+```
+
+## Features
+
+- Text, Markdown, PDF, and Word input
+- Configurable LLM: Ollama, LM Studio, OpenAI, Anthropic, Gemini
+- RDF Turtle knowledge graphs with local ontology (`rdf:type`)
+- HTML document markup generated from the TTL
+- n8n HTTP API (`python main.py server`)
+
+## CLI reference
+
+```bash
+# Full pipeline: TTL then HTML
+uv run python main.py process <path-to-document>
+
+# n8n integration server
+uv run python main.py server --port 5000
+```
+
+Supported inputs: `.txt`, `.md`, `.pdf`, `.docx`.
 
 ## Configuration
 
-Edit `config/config.yaml` to customize:
-- LLM parameters
-- Document chunking settings
-- Storage paths
-- n8n server settings
+[`config/config.yaml`](config/config.yaml) controls:
 
-## Integration with RAG LLM
+- **llm** — provider, model, `base_url`, `api_key_env`, generation limits  
+- **document** — `chunk_size`, `overlap`  
+- **storage** — directories for graphs, documents, ontology  
 
-The system integrates with the existing RAG chatbot LLM located at:
-`_CML_AMP_LLM_Chatbot_Augmented_with_Enterprise_Data/utils/model_llm_utils.py`
+API keys belong in the environment only (never in YAML). Copy [`.env.example`](.env.example) as a reminder.
 
-The system will auto-detect the RAG project, or you can specify the path in the configuration.
+## n8n API
 
-## Future Enhancements
+With the server running:
 
-- Ontology management (planned for future phase)
-- Entity deduplication across documents
-- Knowledge graph querying and visualization
-- Additional document formats
+- `GET /health`
+- `POST /process` — body: `{"file_path": "...", "chunk_size": 1000, "overlap": 100}`
+- `POST /extract/entities`, `POST /extract/relationships`, `POST /store`
+- `GET /metadata`, `GET /metadata/<document_id>`
 
 ## License
 
 See LICENSE file for details.
-

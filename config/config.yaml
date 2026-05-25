@@ -2,29 +2,33 @@
 
 # LLM Configuration
 llm:
-  # Path to RAG chatbot project (relative or absolute)
-  # If None, will try to auto-detect
-  rag_project_path: null
-  
-  # Generation parameters
+  # ollama | lmstudio | openai | anthropic | gemini
+  provider: lmstudio
+  model: qwen3-14b
+  # Optional override (defaults: Ollama http://localhost:11434/v1, LM Studio :1234/v1)
+  base_url: http://127.0.0.1:1234/v1
+  # Environment variable for API key (null = provider default; Ollama/LM Studio often need none)
+  api_key_env: null
+  timeout_seconds: 300
   temperature: 0.3
-  max_new_tokens: 512
-  top_p: 0.85
-  top_k: 70
-  repetition_penalty: 1.07
+  max_new_tokens: 4096
+  # Prepend /no_think to disable extended reasoning on thinking models (qwen3, etc.)
+  # Prevents token exhaustion before the JSON answer is emitted.
+  disable_thinking: true
 
 # Document Processing
 document:
-  chunk_size: 1000  # Words per chunk
-  overlap: 100       # Overlapping words between chunks
+  chunk_size: 1000
+  overlap: 100
 
 # Storage Configuration
 storage:
   knowledge_graphs_dir: "data/knowledge_graphs"
   metadata_file: "data/metadata.json"
   documents_dir: "data/documents"
-  ontology_dir: "data/ontology" #TODO to be supported by the code
-  ontology_file: "data/ontology/ontology.ttl" #TODO to be supported by the code
+  ontology_dir: "data/ontology"
+  ontology_file: "data/ontology/ontology.ttl"
+
 # n8n Server Configuration
 n8n:
   host: "0.0.0.0"
@@ -33,11 +37,7 @@ n8n:
 
 # Extraction Configuration
 extraction:
-  # Entity extraction settings
   entity_extraction:
     enabled: true
-    
-  # Relationship extraction settings
   relationship_extraction:
     enabled: true
-
