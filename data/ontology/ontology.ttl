@@ -1,3 +1,8 @@
+# ontology_proposed.ttl — generated 2026-05-25T15:27:40Z by test_ontology_document.txt
+# Review proposed additions below, then run:
+#   cp data/ontology/ontology_proposed.ttl data/ontology/ontology.ttl
+# or: python main.py ontology approve
+
 @prefix ont: <http://example.org/ontology/> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
@@ -29,6 +34,10 @@ ont:Other a owl:Class ;
 ont:Person a owl:Class ;
     rdfs:label "Person" ;
     rdfs:comment "A human being or individual" .
+
+ont:Platform a owl:Class ;
+    rdfs:label "Platform" ;
+    rdfs:comment "Proposed from: test_ontology_document.txt (triple: Cloudera Machine Learning is platform)" .
 
 ont:Product a owl:Class ;
     rdfs:label "Product" ;
