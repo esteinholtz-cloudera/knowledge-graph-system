@@ -42,6 +42,12 @@ extraction:
   relationship_extraction:
     enabled: true
 
+# Graph Visualisation
+visualization:
+  # Path to the ai-knowledge-graph project containing ttl_to_html.py.
+  # null = auto-detect ~/src/ai-knowledge-graph or sibling directory.
+  ai_kg_path: null
+
 # Entity Resolution (post-extraction deduplication pass)
 entity_resolution:
   enabled: false

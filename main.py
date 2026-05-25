@@ -3,6 +3,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 from src.config.settings import load_config
 from src.document.processor import DocumentProcessor
@@ -81,7 +82,43 @@ def run_precheck() -> bool:
     return all_ok
 
 
-def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs", max_chunks: int = None):
+def generate_graph_html(ttl_path: str, graph_html_path: str) -> Optional[str]:
+    """
+    Run ttl_to_html.py from the ai-knowledge-graph project to produce an
+    interactive graph visualisation. Returns the output path or None on failure.
+    """
+    import subprocess
+
+    app_config = load_config()
+    ai_kg_path = app_config.visualization.resolved_ai_kg_path()
+    if not ai_kg_path:
+        print("  ✗ Graph skipped — ai-knowledge-graph not found. Set visualization.ai_kg_path in config.yaml")
+        return None
+
+    script = Path(ai_kg_path) / "ttl_to_html.py"
+    python = Path(ai_kg_path) / ".venv" / "bin" / "python"
+    if not python.exists():
+        python = Path("python3")
+
+    print(f"  Generating graph visualisation...")
+    result = subprocess.run(
+        [str(python), str(script), ttl_path, graph_html_path],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"  ✗ Graph generation failed:\n{result.stderr.strip()}")
+        return None
+
+    # Print stats line from the script output
+    for line in result.stdout.splitlines():
+        if "Nodes:" in line or "Edges:" in line or "Communities:" in line:
+            print(f"    {line.strip()}")
+
+    print(f"  Graph HTML saved to: {graph_html_path}")
+    return graph_html_path
+
+
+def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs", max_chunks: int = None, with_graph: bool = False):
     """Process a document and extract knowledge graph."""
     print(f"Processing document: {file_path}")
 
@@ -202,6 +239,13 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
     markup_path = markup_generator.save_markup(html_content, str(markup_output_path))
     print(f"   HTML markup saved to: {markup_path}")
 
+    # Step 3 (optional): Generate interactive graph visualisation
+    graph_path = None
+    if with_graph:
+        print(f"\n3. Generating graph visualisation...")
+        graph_output = _PROJECT_ROOT / "data" / "documents" / f"{original_filename}_graph.html"
+        graph_path = generate_graph_html(kg_path, str(graph_output))
+
     store = MetadataStore()
     store.add_document(document_id, doc_data, kg_path)
     print(f"Metadata updated")
@@ -210,6 +254,7 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         'document_id': document_id,
         'kg_path': kg_path,
         'markup_path': markup_path,
+        'graph_path': graph_path,
         'entity_count': len(unique_entities),
         'triple_count': len(all_triples),
         'proposals': proposals,
@@ -240,6 +285,7 @@ def main():
     p.add_argument('file_path')
     p.add_argument('--output-dir', default='data/knowledge_graphs')
     p.add_argument('--max-chunks', type=int, default=None, help='Limit number of chunks processed (for testing)')
+    p.add_argument('--with-graph', action='store_true', help='Also generate interactive graph HTML via ai-knowledge-graph/ttl_to_html.py')
 
     # server
     s = subparsers.add_parser('server', help='Start n8n API server')
@@ -257,7 +303,7 @@ def main():
     if args.command == 'process':
         if not run_precheck():
             sys.exit(1)
-        result = process_and_extract(args.file_path, args.output_dir, max_chunks=args.max_chunks)
+        result = process_and_extract(args.file_path, args.output_dir, max_chunks=args.max_chunks, with_graph=args.with_graph)
         print("\n" + "=" * 50)
         print("Processing complete!")
         print("=" * 50)

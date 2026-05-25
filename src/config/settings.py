@@ -94,6 +94,26 @@ class ExtractionSettings(BaseModel):
     relationship_extraction: dict = Field(default_factory=lambda: {"enabled": True})
 
 
+class VisualizationSettings(BaseModel):
+    # Path to the ai-knowledge-graph project (for ttl_to_html.py graph generation).
+    # null = auto-detect sibling directory ~/src/ai-knowledge-graph.
+    ai_kg_path: Optional[str] = None
+
+    def resolved_ai_kg_path(self) -> Optional[str]:
+        if self.ai_kg_path:
+            return self.ai_kg_path
+        # Auto-detect common sibling locations
+        from pathlib import Path
+        candidates = [
+            Path.home() / "src" / "ai-knowledge-graph",
+            Path(__file__).parent.parent.parent.parent / "ai-knowledge-graph",
+        ]
+        for p in candidates:
+            if (p / "ttl_to_html.py").exists():
+                return str(p)
+        return None
+
+
 class AppSettings(BaseModel):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     document: DocumentSettings = Field(default_factory=DocumentSettings)
@@ -101,6 +121,7 @@ class AppSettings(BaseModel):
     n8n: N8nSettings = Field(default_factory=N8nSettings)
     extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
     entity_resolution: EntityResolutionSettings = Field(default_factory=EntityResolutionSettings)
+    visualization: VisualizationSettings = Field(default_factory=VisualizationSettings)
 
 
 def load_config(config_path: Optional[str] = None) -> AppSettings:
