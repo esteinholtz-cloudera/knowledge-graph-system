@@ -410,11 +410,18 @@ class HTMLMarkupGenerator:
         # Build entity list HTML
         entity_list_html = self._generate_entity_list(entities)
         
-        # Build TTL file link if available
+        # Link to the interactive graph visualisation (same directory, relative href).
+        # The _graph.html file is generated separately by ttl_to_html.py.
         ttl_link_html = ""
-        if ttl_file_path:
-            ttl_file_path_escaped = html.escape(ttl_file_path)
-            ttl_link_html = f'<div style="margin-top: 10px;"><a href="file://{ttl_file_path_escaped}" target="_blank" style="color: #4A90E2; text-decoration: none;">📄 View Knowledge Graph (TTL)</a></div>'
+        if document_filename:
+            stem = Path(document_filename).stem
+            graph_html = f"{stem}_graph.html"
+            ttl_link_html = (
+                f'<div style="margin-top: 10px;">'
+                f'<a href="{html.escape(graph_html)}" target="_blank" '
+                f'style="color: #4A90E2; text-decoration: none;">🔗 View Knowledge Graph</a>'
+                f'</div>'
+            )
         
         html_template = f"""<!DOCTYPE html>
 <html lang="en">
