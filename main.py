@@ -226,6 +226,12 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         print(f"   Review: data/ontology/ontology_proposed.ttl")
         print(f"   Approve with: python main.py ontology approve")
 
+    # Derive all output filenames from the document stem — single source of truth.
+    original_filename = Path(doc_data['filename']).stem
+    graph_html_filename = f"{original_filename}_graph.html"
+    markup_output_path = _PROJECT_ROOT / "data" / "documents" / f"{original_filename}_markup.html"
+    graph_output_path = _PROJECT_ROOT / "data" / "documents" / graph_html_filename
+
     # Step 2: Generate HTML markup from TTL.
     print(f"\n2. Generating HTML markup from knowledge graph...")
     markup_generator = HTMLMarkupGenerator()
@@ -233,9 +239,8 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         text=doc_data['text'],
         ttl_file_path=kg_path,
         document_filename=doc_data['filename'],
+        graph_html_filename=graph_html_filename,  # explicit — no naming guesswork
     )
-    original_filename = Path(doc_data['filename']).stem
-    markup_output_path = _PROJECT_ROOT / "data" / "documents" / f"{original_filename}_markup.html"
     markup_path = markup_generator.save_markup(html_content, str(markup_output_path))
     print(f"   HTML markup saved to: {markup_path}")
 
@@ -243,8 +248,7 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
     graph_path = None
     if with_graph:
         print(f"\n3. Generating graph visualisation...")
-        graph_output = _PROJECT_ROOT / "data" / "documents" / f"{original_filename}_graph.html"
-        graph_path = generate_graph_html(kg_path, str(graph_output))
+        graph_path = generate_graph_html(kg_path, str(graph_output_path))
 
     store = MetadataStore()
     store.add_document(document_id, doc_data, kg_path)
