@@ -1,72 +1,60 @@
 """Write knowledge graphs to Turtle format."""
-import os
 from pathlib import Path
-from rdflib import Graph
+from typing import Dict, List, Optional, Tuple
+
+from rdflib import Graph, Literal
 from rdflib.namespace import RDF
-from typing import List, Dict, Optional
-from .rdf_utils import (
-    KG, DOC, SCHEMA, ONT,
-    create_entity_uri,
-    create_predicate_uri,
-    create_document_uri,
-    sanitize_literal
-)
-from .ontology_manager import OntologyManager
+
+from .ontology_manager import ISA_PREDICATES, OntologyManager
+from .rdf_utils import DOC, KG, ONT, SCHEMA, create_document_uri, create_entity_uri, sanitize_literal
+
+
+def _is_isa_predicate(predicate: str) -> bool:
+    """Return True if the predicate expresses an is-a / instance-of relationship."""
+    return predicate.strip().lower().replace('-', '_') in ISA_PREDICATES
 
 
 class TurtleWriter:
     """Write knowledge graphs to Turtle format."""
-    
-    def __init__(self, output_dir: str = "data/knowledge_graphs", ontology_dir: str = "data/ontology"):
-        """
-        Initialize Turtle writer.
-        
-        Args:
-            output_dir: Directory to store Turtle files
-            ontology_dir: Directory containing ontology files
-        """
+
+    def __init__(
+        self,
+        output_dir: str = "data/knowledge_graphs",
+        ontology_dir: str = "data/ontology",
+    ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.ontology_manager = OntologyManager(ontology_dir)
-    
+
     def write_knowledge_graph(
         self,
         document_id: str,
         triples: List[Dict],
         document_metadata: Optional[Dict] = None,
-        entities: Optional[List[Dict]] = None
-    ) -> str:
+        entities: Optional[List[Dict]] = None,
+    ) -> Tuple[str, List[Dict]]:
         """
         Write knowledge graph to Turtle file with ontology typing.
-        
-        Args:
-            document_id: Unique identifier for the document
-            triples: List of triple dictionaries with 'subject', 'predicate', 'object'
-            document_metadata: Optional metadata about the document
-            entities: Optional list of entities with type information
-            
+
         Returns:
-            Path to the created Turtle file
+            (kg_path, proposals) where proposals is the list of ontology
+            class candidates that need human approval.
         """
-        # Create RDF graph
         graph = Graph()
-        
-        # Bind namespaces
         graph.bind("kg", KG)
         graph.bind("doc", DOC)
         graph.bind("schema", SCHEMA)
-        graph.bind("rdfs", "http://www.w3.org/2000/01/rdf-schema#")
+        graph.bind("ont", ONT)
         graph.bind("rdf", RDF)
-        graph.bind("ont", ONT)  # Add ontology namespace
-        
-        # Import ontology
-        ontology_path = self.ontology_manager.get_ontology_file_path()
-        graph.parse(ontology_path, format='turtle')
-        
-        # Create document URI
+        graph.bind("rdfs", "http://www.w3.org/2000/01/rdf-schema#")
+
+        from rdflib import URIRef
+        from rdflib.namespace import OWL
         doc_uri = create_document_uri(document_id)
-        
-        # Add document metadata if provided
+        ontology_uri = URIRef(str(ONT).rstrip("/"))
+        graph.add((doc_uri, OWL.imports, ontology_uri))
+
+        # Document metadata
         if document_metadata:
             if 'path' in document_metadata:
                 graph.add((doc_uri, SCHEMA.url, sanitize_literal(document_metadata['path'])))
@@ -74,72 +62,88 @@ class TurtleWriter:
                 graph.add((doc_uri, SCHEMA.name, sanitize_literal(document_metadata['filename'])))
             if 'hash' in document_metadata:
                 graph.add((doc_uri, KG.hash, sanitize_literal(document_metadata['hash'])))
-        
-        # Track entities and their types
-        entity_types = {}
+
+        # Build entity-name → type map and ensure approved classes exist.
+        entity_types: Dict[str, str] = {}
         if entities:
             for entity in entities:
-                entity_name = entity.get('entity', '').strip()
-                entity_type = entity.get('type', 'Other').strip()
-                if entity_name:
-                    entity_types[entity_name] = entity_type
-                    # Ensure ontology class exists
-                    self.ontology_manager.ensure_class_exists(entity_type)
-        
-        # Add triples to graph
+                name = entity.get('entity', '').strip()
+                etype = entity.get('type', 'Other').strip()
+                if name:
+                    canonical = self.ontology_manager.normalise_type(etype)
+                    entity_types[name] = canonical
+                    self.ontology_manager.ensure_approved_class(canonical)
+
+        # All names known to be entities (subjects from extractor + entity list).
+        known_entity_names = set(entity_types.keys())
+
+        # Process triples.
+        written_entity_uris = set()
+
         for triple in triples:
             subject = triple.get('subject', '').strip()
             predicate = triple.get('predicate', '').strip()
             obj = triple.get('object', '').strip()
-            
+
             if not subject or not predicate or not obj:
                 continue
-            
-            # Create URIs
-            subj_uri = create_entity_uri(subject)
-            pred_uri = create_predicate_uri(predicate)
-            obj_uri = create_entity_uri(obj)
-            
-            # Add triple
-            graph.add((subj_uri, pred_uri, obj_uri))
-            
-            # Link entities to document
-            graph.add((subj_uri, DOC.sourceDocument, doc_uri))
-            graph.add((obj_uri, DOC.sourceDocument, doc_uri))
-            
-            # Add rdf:type for subject if type is known
-            if subject in entity_types:
-                type_class = self.ontology_manager.get_ontology_class_uri(entity_types[subject])
-                graph.add((subj_uri, RDF.type, type_class))
-            
-            # Add rdf:type for object if type is known
-            if obj in entity_types:
-                type_class = self.ontology_manager.get_ontology_class_uri(entity_types[obj])
-                graph.add((obj_uri, RDF.type, type_class))
-        
-        # Generate filename
-        filename = f"{document_id}.ttl"
-        filepath = self.output_dir / filename
-        
-        # Write to file
-        graph.serialize(destination=str(filepath), format='turtle')
-        
-        return str(filepath)
-    
-    def get_knowledge_graph_path(self, document_id: str) -> Optional[str]:
-        """
-        Get the path to a knowledge graph file for a document.
-        
-        Args:
-            document_id: Document identifier
-            
-        Returns:
-            Path to Turtle file if it exists, None otherwise
-        """
-        filename = f"{document_id}.ttl"
-        filepath = self.output_dir / filename
-        
-        if filepath.exists():
-            return str(filepath)
-        return None
 
+            subj_uri = create_entity_uri(subject)
+            known_entity_names.add(subject)
+
+            if _is_isa_predicate(predicate):
+                # Treat as rdf:type assertion: subject is an instance of obj-class.
+                canonical_class = self.ontology_manager.normalise_type(obj)
+                class_uri = self.ontology_manager.get_ontology_class_uri(canonical_class)
+
+                if self.ontology_manager.class_is_approved(canonical_class):
+                    graph.add((subj_uri, RDF.type, class_uri))
+                else:
+                    source = (
+                        f"{document_metadata.get('filename', document_id)}"
+                        f" (triple: {subject} {predicate} {obj})"
+                    )
+                    self.ontology_manager.propose_class(canonical_class, source)
+                    # Still write the rdf:type — it points at the candidate URI.
+                    # The class will become formally defined once approved.
+                    graph.add((subj_uri, RDF.type, class_uri))
+
+                graph.add((subj_uri, DOC.sourceDocument, doc_uri))
+                written_entity_uris.add(subj_uri)
+
+            else:
+                # Regular relationship triple.
+                from .rdf_utils import create_predicate_uri
+                pred_uri = create_predicate_uri(predicate)
+
+                if obj in known_entity_names:
+                    obj_node = create_entity_uri(obj)
+                    graph.add((obj_node, DOC.sourceDocument, doc_uri))
+                    written_entity_uris.add(obj_node)
+                else:
+                    obj_node = Literal(obj)
+
+                graph.add((subj_uri, pred_uri, obj_node))
+                graph.add((subj_uri, DOC.sourceDocument, doc_uri))
+                written_entity_uris.add(subj_uri)
+
+        # Emit rdf:type for every entity that was written, using the entity_types map.
+        for name, canonical_type in entity_types.items():
+            uri = create_entity_uri(name)
+            if uri in written_entity_uris:
+                type_uri = self.ontology_manager.get_ontology_class_uri(canonical_type)
+                graph.add((uri, RDF.type, type_uri))
+
+        # Persist KG file.
+        filepath = self.output_dir / f"{document_id}.ttl"
+        graph.serialize(destination=str(filepath), format='turtle')
+
+        # Persist proposal file (no-op if nothing new).
+        doc_name = document_metadata.get('filename', document_id) if document_metadata else document_id
+        self.ontology_manager.write_proposed_ontology(generated_by=doc_name)
+
+        return str(filepath), self.ontology_manager.get_proposals()
+
+    def get_knowledge_graph_path(self, document_id: str) -> Optional[str]:
+        filepath = self.output_dir / f"{document_id}.ttl"
+        return str(filepath) if filepath.exists() else None
