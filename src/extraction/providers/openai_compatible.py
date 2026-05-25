@@ -1,9 +1,37 @@
 """OpenAI-compatible chat API (Ollama, LM Studio, OpenAI)."""
+import re
+import sys
+import threading
+import time
 from typing import List, Optional
 
 import httpx
 
 from .base import LLMProviderBase
+
+
+class _Ticker:
+    """Print a dot to stderr every `interval` seconds while a task runs."""
+
+    def __init__(self, interval: float = 3.0):
+        self._interval = interval
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
+        while not self._stop.wait(self._interval):
+            sys.stderr.write(".")
+            sys.stderr.flush()
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_):
+        self._stop.set()
+        self._thread.join()
+        sys.stderr.write("\n")
+        sys.stderr.flush()
 
 
 class OpenAICompatibleProvider(LLMProviderBase):
@@ -48,7 +76,7 @@ class OpenAICompatibleProvider(LLMProviderBase):
         if stop_words:
             body["stop"] = stop_words
 
-        with httpx.Client(timeout=self.timeout_seconds) as client:
+        with _Ticker(), httpx.Client(timeout=self.timeout_seconds) as client:
             response = client.post(url, json=body, headers=headers)
             response.raise_for_status()
             data = response.json()
@@ -65,7 +93,6 @@ class OpenAICompatibleProvider(LLMProviderBase):
             content = message.get("reasoning_content") or ""
 
         # Strip <think>...</think> blocks that some models embed inline.
-        import re
         content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
 
         if not content:

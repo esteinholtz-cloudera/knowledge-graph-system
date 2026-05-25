@@ -22,6 +22,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+[tool.pytest.ini_options]
+addopts = "-v -s"
+
 [tool.uv]
 dev-dependencies = [
     "pytest>=8.0",
