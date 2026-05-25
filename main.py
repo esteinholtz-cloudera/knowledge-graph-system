@@ -16,6 +16,71 @@ from src.storage.metadata_store import MetadataStore
 _PROJECT_ROOT = Path(__file__).parent
 
 
+def run_precheck() -> bool:
+    """
+    Verify that configured LLM and optional embedding model are reachable.
+    Prints a status summary and returns True if all required services are available.
+    """
+    import httpx
+    from src.config.settings import load_config
+
+    app = load_config()
+    llm = app.llm
+    res = app.entity_resolution
+    base_url = llm.resolved_base_url()
+    all_ok = True
+
+    print("Pre-flight checks")
+    print("─" * 40)
+
+    # 1. LLM endpoint reachable + model listed
+    try:
+        headers = {}
+        if llm.get_api_key():
+            headers["Authorization"] = f"Bearer {llm.get_api_key()}"
+        resp = httpx.get(f"{base_url}/models", headers=headers, timeout=8)
+        resp.raise_for_status()
+        available = [m["id"] for m in resp.json().get("data", [])]
+        if llm.model in available:
+            print(f"  ✓ LLM model:      {llm.model}")
+        else:
+            print(f"  ✗ LLM model:      {llm.model!r} NOT found at {base_url}")
+            print(f"    Available:      {', '.join(available)}")
+            all_ok = False
+    except Exception as e:
+        print(f"  ✗ LLM endpoint:   {base_url} unreachable ({e})")
+        all_ok = False
+
+    # 2. Embedding model (only if resolution.embedding strategy is active)
+    if res.enabled and "embedding" in res.strategies:
+        try:
+            resp = httpx.get(f"{base_url}/models", headers=headers, timeout=8)
+            available = [m["id"] for m in resp.json().get("data", [])]
+            if res.embedding_model in available:
+                print(f"  ✓ Embed model:    {res.embedding_model}")
+            else:
+                print(f"  ✗ Embed model:    {res.embedding_model!r} NOT found")
+                print(f"    Available:      {', '.join(available)}")
+                print(f"    Hint: load it in LM Studio or update embedding_model in config.yaml")
+                all_ok = False
+        except Exception as e:
+            print(f"  ✗ Embed check failed: {e}")
+            all_ok = False
+    elif res.enabled:
+        print(f"  –  Embed model:   (not used — strategies: {res.strategies})")
+
+    # 3. Entity resolution status
+    if res.enabled:
+        print(f"  ✓ Resolution:     enabled ({', '.join(res.strategies)}, threshold={res.embedding_threshold})")
+    else:
+        print(f"  –  Resolution:    disabled")
+
+    print("─" * 40)
+    if not all_ok:
+        print("  Pre-flight FAILED — fix the issues above before running.\n")
+    return all_ok
+
+
 def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs", max_chunks: int = None):
     """Process a document and extract knowledge graph."""
     print(f"Processing document: {file_path}")
@@ -190,6 +255,8 @@ def main():
     args = parser.parse_args()
 
     if args.command == 'process':
+        if not run_precheck():
+            sys.exit(1)
         result = process_and_extract(args.file_path, args.output_dir, max_chunks=args.max_chunks)
         print("\n" + "=" * 50)
         print("Processing complete!")
