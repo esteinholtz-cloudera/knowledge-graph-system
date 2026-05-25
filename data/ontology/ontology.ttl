@@ -1,0 +1,40 @@
+@prefix ont: <http://example.org/ontology/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+ont:Concept a owl:Class ;
+    rdfs:label "Concept" ;
+    rdfs:comment "An abstract concept or idea" .
+
+ont:Date a owl:Class ;
+    rdfs:label "Date" ;
+    rdfs:comment "A date or time period" .
+
+ont:Event a owl:Class ;
+    rdfs:label "Event" ;
+    rdfs:comment "An event or occurrence" .
+
+ont:Location a owl:Class ;
+    rdfs:label "Location" ;
+    rdfs:comment "A geographical place or location" .
+
+ont:Organization a owl:Class ;
+    rdfs:label "Organization" ;
+    rdfs:comment "A company, institution, or group" .
+
+ont:Other a owl:Class ;
+    rdfs:label "Other" ;
+    rdfs:comment "Other type of entity" .
+
+ont:Person a owl:Class ;
+    rdfs:label "Person" ;
+    rdfs:comment "A human being or individual" .
+
+ont:Product a owl:Class ;
+    rdfs:label "Product" ;
+    rdfs:comment "A product or service" .
+
+ont:Technology a owl:Class ;
+    rdfs:label "Technology" ;
+    rdfs:comment "A technology, tool, or platform" .
+
