@@ -41,3 +41,23 @@ extraction:
     enabled: true
   relationship_extraction:
     enabled: true
+
+# Entity Resolution (post-extraction deduplication pass)
+entity_resolution:
+  enabled: false
+  # Strategies applied in order: rule_based | embedding | llm
+  strategies:
+    - rule_based
+    - embedding
+  # Cosine similarity threshold for embedding-based matching (0–1)
+  embedding_threshold: 0.90
+  # Embedding model served at the same base_url as the LLM
+  embedding_model: "text-embedding-nomic-embed-text-v1.5"
+  # Use LLM to confirm ambiguous embedding matches before merging
+  llm_confirmation: true
+  # Canonical form when merging variants: title_case | longer | first_seen
+  canonical_form: title_case
+  # Known abbreviation expansions (applied by rule_based strategy)
+  abbreviation_hints: {}
+  #  LLM: Large Language Model
+  #  RAG: Retrieval-Augmented Generation

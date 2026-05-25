@@ -4,9 +4,11 @@ import sys
 import time
 from pathlib import Path
 
+from src.config.settings import load_config
 from src.document.processor import DocumentProcessor
 from src.document.html_markup import HTMLMarkupGenerator
 from src.extraction.entity_extractor import EntityExtractor
+from src.extraction.entity_resolver import EntityResolver
 from src.extraction.relationship_extractor import RelationshipExtractor
 from src.storage.turtle_writer import TurtleWriter
 from src.storage.metadata_store import MetadataStore
@@ -91,6 +93,15 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
 
     print(f"\nTotal unique entities: {len(unique_entities)}")
     print(f"Total unique triples:  {len(all_triples)}")
+
+    # Entity resolution pass (if enabled in config)
+    app_config = load_config()
+    if app_config.entity_resolution.enabled:
+        print(f"\nRunning entity resolution ({', '.join(app_config.entity_resolution.strategies)})...")
+        resolver = EntityResolver(app_config.entity_resolution, llm_client=None)
+        resolved_list = resolver.resolve(list(unique_entities.values()))
+        unique_entities = {e['entity']: e for e in resolved_list}
+        print(f"  After resolution: {len(unique_entities)} entities")
 
     # Step 1: Generate TTL knowledge graph.
     print(f"\n1. Generating knowledge graph (TTL)...")

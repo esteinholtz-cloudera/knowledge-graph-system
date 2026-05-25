@@ -1,7 +1,7 @@
 """Load application settings from config.yaml."""
 import os
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Dict, Literal, List, Optional
 
 import yaml
 from pydantic import BaseModel, Field
@@ -72,6 +72,23 @@ class N8nSettings(BaseModel):
     debug: bool = False
 
 
+class EntityResolutionSettings(BaseModel):
+    enabled: bool = False
+    # Strategies to apply in order. Options: rule_based, embedding, llm
+    strategies: List[Literal["rule_based", "embedding", "llm"]] = ["rule_based"]
+    # Embedding similarity threshold (0–1). Pairs above this are candidate matches.
+    embedding_threshold: float = 0.90
+    # Model for embeddings (OpenAI-compatible /v1/embeddings endpoint).
+    # Defaults to the same base_url as the LLM provider.
+    embedding_model: str = "text-embedding-nomic-embed-text-v1.5"
+    # Whether to use the LLM to confirm ambiguous embedding matches before merging.
+    llm_confirmation: bool = True
+    # Canonical form preference when merging: "longer" | "title_case" | "first_seen"
+    canonical_form: Literal["longer", "title_case", "first_seen"] = "title_case"
+    # Custom abbreviation hints: {"LLM": "Large Language Model", ...}
+    abbreviation_hints: Dict[str, str] = Field(default_factory=dict)
+
+
 class ExtractionSettings(BaseModel):
     entity_extraction: dict = Field(default_factory=lambda: {"enabled": True})
     relationship_extraction: dict = Field(default_factory=lambda: {"enabled": True})
@@ -83,6 +100,7 @@ class AppSettings(BaseModel):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     n8n: N8nSettings = Field(default_factory=N8nSettings)
     extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
+    entity_resolution: EntityResolutionSettings = Field(default_factory=EntityResolutionSettings)
 
 
 def load_config(config_path: Optional[str] = None) -> AppSettings:
