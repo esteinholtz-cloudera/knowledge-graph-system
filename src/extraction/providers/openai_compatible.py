@@ -57,7 +57,17 @@ class OpenAICompatibleProvider(LLMProviderBase):
         if not choices:
             raise ValueError("LLM returned no choices")
         message = choices[0].get("message") or {}
-        content = message.get("content")
-        if content is None:
+        content = message.get("content") or ""
+
+        # Thinking models (e.g. qwen3) put reasoning in reasoning_content and
+        # the actual answer in content. If content is empty, fall back.
+        if not content.strip():
+            content = message.get("reasoning_content") or ""
+
+        # Strip <think>...</think> blocks that some models embed inline.
+        import re
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+        if not content:
             raise ValueError("LLM returned empty content")
-        return content.strip()
+        return content
