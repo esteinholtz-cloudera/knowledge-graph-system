@@ -12,6 +12,9 @@ llm:
   timeout_seconds: 300
   temperature: 0.3
   max_new_tokens: 4096
+  # Prepend /no_think to disable extended reasoning on thinking models (qwen3, etc.)
+  # Prevents token exhaustion before the JSON answer is emitted.
+  disable_thinking: true
 
 # Document Processing
 document:

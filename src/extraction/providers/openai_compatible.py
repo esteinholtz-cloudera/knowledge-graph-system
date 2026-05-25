@@ -43,11 +43,13 @@ class OpenAICompatibleProvider(LLMProviderBase):
         model: str,
         api_key: Optional[str] = None,
         timeout_seconds: int = 120,
+        disable_thinking: bool = False,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
+        self.disable_thinking = disable_thinking
 
     def generate(
         self,
@@ -62,9 +64,17 @@ class OpenAICompatibleProvider(LLMProviderBase):
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
+        # Prepend /no_think to disable thinking mode on models that support it
+        # (e.g. qwen3). This prevents token exhaustion on the reasoning phase.
+        effective_system = system_prompt or ""
+        if self.disable_thinking and effective_system:
+            effective_system = "/no_think\n" + effective_system
+        elif self.disable_thinking:
+            effective_system = "/no_think"
+
         messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+        if effective_system:
+            messages.append({"role": "system", "content": effective_system})
         messages.append({"role": "user", "content": prompt})
 
         body = {

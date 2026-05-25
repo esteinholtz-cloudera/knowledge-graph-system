@@ -18,6 +18,7 @@ def create_provider(settings: LLMSettings) -> LLMProviderBase:
             model=settings.model,
             api_key=api_key,
             timeout_seconds=settings.timeout_seconds,
+            disable_thinking=settings.disable_thinking,
         )
 
     if provider == "anthropic":

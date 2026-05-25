@@ -32,6 +32,9 @@ class LLMSettings(BaseModel):
     timeout_seconds: int = 120
     temperature: float = 0.3
     max_new_tokens: int = 512
+    # Set to true to prepend /no_think to system prompts.
+    # Recommended for qwen3 and other thinking models to avoid token exhaustion.
+    disable_thinking: bool = False
 
     def resolved_base_url(self) -> str:
         if self.base_url:
