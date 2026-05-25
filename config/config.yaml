@@ -49,8 +49,10 @@ entity_resolution:
   strategies:
     - rule_based
     - embedding
-  # Cosine similarity threshold for embedding-based matching (0–1)
-  embedding_threshold: 0.90
+  # Cosine similarity threshold for embedding-based matching (0–1).
+  # 0.92 catches name variants (John / John Smith / Mr Smith) with low false-positive rate.
+  # Use 0.95+ for conservative matching, 0.88–0.90 with llm_confirmation: true for aggressive.
+  embedding_threshold: 0.92
   # Embedding model served at the same base_url as the LLM
   embedding_model: "text-embedding-nomic-embed-text-v1.5"
   # Use LLM to confirm ambiguous embedding matches before merging

@@ -77,7 +77,7 @@ class EntityResolutionSettings(BaseModel):
     # Strategies to apply in order. Options: rule_based, embedding, llm
     strategies: List[Literal["rule_based", "embedding", "llm"]] = ["rule_based"]
     # Embedding similarity threshold (0–1). Pairs above this are candidate matches.
-    embedding_threshold: float = 0.90
+    embedding_threshold: float = 0.92
     # Model for embeddings (OpenAI-compatible /v1/embeddings endpoint).
     # Defaults to the same base_url as the LLM provider.
     embedding_model: str = "text-embedding-nomic-embed-text-v1.5"
