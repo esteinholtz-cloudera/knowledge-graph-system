@@ -11,6 +11,7 @@ from src.document.html_markup import HTMLMarkupGenerator
 from src.extraction.entity_extractor import EntityExtractor
 from src.extraction.entity_resolver import EntityResolver
 from src.extraction.relationship_extractor import RelationshipExtractor
+from src.storage.benchmark_store import create_benchmark_store, BenchmarkStore
 from src.storage.turtle_writer import TurtleWriter
 from src.storage.metadata_store import MetadataStore
 
@@ -120,6 +121,7 @@ def generate_graph_html(ttl_path: str, graph_html_path: str) -> Optional[str]:
 
 def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs", max_chunks: int = None, with_graph: bool = False):
     """Process a document and extract knowledge graph."""
+    run_start = time.monotonic()
     print(f"Processing document: {file_path}")
 
     processor = DocumentProcessor()
@@ -135,6 +137,21 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         chunks = chunks[:max_chunks]
     else:
         print(f"Split into {len(chunks)} chunks")
+
+    app_config = load_config()
+
+    # Open benchmark DB and start run record (no-op if duckdb not installed)
+    bench = create_benchmark_store()
+    run_id = bench.start_run(
+        document_filename=doc_data['filename'],
+        document_id=document_id,
+        word_count=doc_data['word_count'],
+        llm_provider=app_config.llm.provider,
+        llm_model=app_config.llm.model,
+        resolution_enabled=app_config.entity_resolution.enabled,
+        resolution_strategies=list(app_config.entity_resolution.strategies),
+        max_chunks=max_chunks,
+    )
 
     entity_extractor = EntityExtractor()
     relationship_extractor = RelationshipExtractor()
@@ -161,19 +178,23 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         print(f"{'─' * 50}")
         chunk_start = time.monotonic()
 
+        t0 = time.monotonic()
         entities = entity_extractor.extract(
             chunk,
             progress_label=f"chunk {chunk_num}/{total_chunks} · entities",
         )
+        bench.record_llm_call(run_id, "entity_extraction", time.monotonic() - t0, chunk_number=chunk_num)
         all_entities.extend(entities)
         print(f"  ✓ Entities:      {len(entities)}")
 
         entity_names = [e.get('entity', '') for e in entities if e.get('entity')]
+        t0 = time.monotonic()
         triples = relationship_extractor.extract(
             chunk,
             entity_names,
             progress_label=f"chunk {chunk_num}/{total_chunks} · relationships",
         )
+        bench.record_llm_call(run_id, "relationship_extraction", time.monotonic() - t0, chunk_number=chunk_num)
         for t in triples:
             key = (t.get('subject', ''), t.get('predicate', ''), t.get('object', ''))
             if key not in all_triples_set:
@@ -182,6 +203,13 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         elapsed = time.monotonic() - chunk_start
         chunk_times.append(elapsed)
         print(f"  ✓ Relationships: {len(triples)}  ({elapsed:.1f}s)")
+        bench.record_chunk(
+            run_id, chunk_num,
+            word_count=len(chunk.split()),
+            entities=len(entities),
+            relationships=len(triples),
+            elapsed_s=elapsed,
+        )
 
     # Deduplicate entities — prefer a non-'Other' type if seen in any chunk.
     unique_entities: dict = {}
@@ -193,16 +221,23 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         if existing is None or existing.get('type', 'Other') == 'Other':
             unique_entities[name] = entity
 
-    print(f"\nTotal unique entities: {len(unique_entities)}")
+    entities_raw = len(unique_entities)
+    print(f"\nTotal unique entities: {entities_raw}")
     print(f"Total unique triples:  {len(all_triples)}")
 
     # Entity resolution pass (if enabled in config)
-    app_config = load_config()
     if app_config.entity_resolution.enabled:
         print(f"\nRunning entity resolution ({', '.join(app_config.entity_resolution.strategies)})...")
+        t0 = time.monotonic()
         resolver = EntityResolver(app_config.entity_resolution, llm_client=None)
         resolved_list = resolver.resolve(list(unique_entities.values()))
         unique_entities = {e['entity']: e for e in resolved_list}
+        bench.record_resolution(
+            run_id, "+".join(app_config.entity_resolution.strategies),
+            entities_before=entities_raw,
+            entities_after=len(unique_entities),
+            elapsed_s=time.monotonic() - t0,
+        )
         print(f"  After resolution: {len(unique_entities)} entities")
 
     # Step 1: Generate TTL knowledge graph.
@@ -254,6 +289,18 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
     store.add_document(document_id, doc_data, kg_path)
     print(f"Metadata updated")
 
+    total_elapsed = time.monotonic() - run_start
+    bench.finish_run(
+        run_id,
+        chunk_count=total_chunks,
+        entities_raw=entities_raw,
+        entities_resolved=len(unique_entities),
+        triples=len(all_triples),
+        elapsed_s=total_elapsed,
+        proposals=len(proposals),
+    )
+    bench.close()
+
     return {
         'document_id': document_id,
         'kg_path': kg_path,
@@ -263,6 +310,33 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         'triple_count': len(all_triples),
         'proposals': proposals,
     }
+
+
+def show_benchmark(view: str = "runs", sql: Optional[str] = None):
+    """Display benchmark metrics as a table."""
+    bench = create_benchmark_store()
+    try:
+        if sql:
+            rel = bench.query(sql)
+        elif view == "runs":
+            rel = bench.query(BenchmarkStore.SUMMARY_SQL)
+        elif view == "chunks":
+            rel = bench.query(BenchmarkStore.CHUNK_SQL)
+        elif view == "llm":
+            rel = bench.query(BenchmarkStore.LLM_SQL)
+        else:
+            print(f"Unknown view: {view}. Use: runs | chunks | llm")
+            return
+        print(rel)
+    finally:
+        bench.close()
+
+
+def clear_benchmark():
+    bench = create_benchmark_store()
+    bench.clear()
+    bench.close()
+    print("Benchmark data cleared.")
 
 
 def approve_ontology(ontology_dir: str = "data/ontology"):
@@ -302,6 +376,16 @@ def main():
     ont_sub = ont_p.add_subparsers(dest='ont_command')
     ont_sub.add_parser('approve', help='Approve proposed ontology additions')
 
+    # benchmark
+    bm_p = subparsers.add_parser('benchmark', help='View pipeline benchmark metrics')
+    bm_sub = bm_p.add_subparsers(dest='bm_command')
+    bm_show = bm_sub.add_parser('show', help='Show benchmark table')
+    bm_show.add_argument('view', nargs='?', default='runs', choices=['runs', 'chunks', 'llm'],
+                         help='Table to display (default: runs)')
+    bm_query = bm_sub.add_parser('query', help='Run a custom SQL query')
+    bm_query.add_argument('sql', help='SQL query to execute against the benchmark DB')
+    bm_sub.add_parser('clear', help='Delete all benchmark data')
+
     args = parser.parse_args()
 
     if args.command == 'process':
@@ -328,6 +412,16 @@ def main():
             approve_ontology()
         else:
             ont_p.print_help()
+
+    elif args.command == 'benchmark':
+        if args.bm_command == 'show':
+            show_benchmark(view=args.view)
+        elif args.bm_command == 'query':
+            show_benchmark(sql=args.sql)
+        elif args.bm_command == 'clear':
+            clear_benchmark()
+        else:
+            bm_p.print_help()
 
     else:
         parser.print_help()
