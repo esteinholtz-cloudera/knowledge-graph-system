@@ -156,15 +156,84 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
     entity_extractor = EntityExtractor()
     relationship_extractor = RelationshipExtractor()
 
-    all_entities = []
-    all_triples_set = set()  # deduplicate as (subject, predicate, object) tuples
-    all_triples = []
     total_chunks = len(chunks)
     chunk_times: list = []
 
+    # ── Pass 1: entity extraction across all chunks ───────────────────────
+    print(f"\n{'═' * 50}")
+    print(f"  Pass 1 of 2 — Entity extraction")
+    print(f"{'═' * 50}")
+    all_entities = []
+    chunk_entity_counts = []
+
     for i, chunk in enumerate(chunks):
         chunk_num = i + 1
-        # ETA based on average of completed chunks
+        if chunk_times:
+            avg = sum(chunk_times) / len(chunk_times)
+            remaining = avg * (total_chunks - i)
+            m, s = divmod(int(remaining), 60)
+            eta_str = f"  ETA ~{m}m{s:02d}s" if m else f"  ETA ~{s}s"
+        else:
+            eta_str = ""
+
+        print(f"\n{'─' * 50}")
+        print(f"  Chunk {chunk_num}/{total_chunks}{eta_str}")
+        print(f"{'─' * 50}")
+        t0 = time.monotonic()
+
+        entities = entity_extractor.extract(
+            chunk,
+            progress_label=f"chunk {chunk_num}/{total_chunks} · entities",
+        )
+        elapsed = time.monotonic() - t0
+        bench.record_llm_call(run_id, "entity_extraction", elapsed, chunk_number=chunk_num)
+        all_entities.extend(entities)
+        chunk_entity_counts.append(len(entities))
+        chunk_times.append(elapsed)
+        print(f"  ✓ Entities: {len(entities)}  ({elapsed:.1f}s)")
+
+    # Deduplicate and resolve entities before relationship extraction
+    unique_entities: dict = {}
+    for entity in all_entities:
+        name = entity.get('entity', '')
+        if not name:
+            continue
+        existing = unique_entities.get(name)
+        if existing is None or existing.get('type', 'Other') == 'Other':
+            unique_entities[name] = entity
+
+    entities_raw = len(unique_entities)
+    print(f"\nTotal unique entities (raw): {entities_raw}")
+
+    if app_config.entity_resolution.enabled:
+        print(f"\nRunning entity resolution ({', '.join(app_config.entity_resolution.strategies)})...")
+        t0 = time.monotonic()
+        resolver = EntityResolver(app_config.entity_resolution, llm_client=None)
+        resolved_list = resolver.resolve(list(unique_entities.values()))
+        unique_entities = {e['entity']: e for e in resolved_list}
+        bench.record_resolution(
+            run_id, "+".join(app_config.entity_resolution.strategies),
+            entities_before=entities_raw,
+            entities_after=len(unique_entities),
+            elapsed_s=time.monotonic() - t0,
+        )
+        print(f"  After resolution: {len(unique_entities)} entities")
+
+    # Canonical entity names to feed to relationship extractor
+    canonical_names = list(unique_entities.keys())
+    # Case-insensitive lookup: lowercase → canonical name
+    canonical_lookup = {name.lower(): name for name in canonical_names}
+
+    # ── Pass 2: relationship extraction using canonical entity names ───────
+    print(f"\n{'═' * 50}")
+    print(f"  Pass 2 of 2 — Relationship extraction")
+    print(f"{'═' * 50}")
+    all_triples_set: set = set()
+    all_triples = []
+    chunk_times = []
+
+    for i, chunk in enumerate(chunks):
+        chunk_num = i + 1
         if chunk_times:
             avg = sum(chunk_times) / len(chunk_times)
             remaining = avg * (total_chunks - i)
@@ -179,66 +248,39 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         chunk_start = time.monotonic()
 
         t0 = time.monotonic()
-        entities = entity_extractor.extract(
-            chunk,
-            progress_label=f"chunk {chunk_num}/{total_chunks} · entities",
-        )
-        bench.record_llm_call(run_id, "entity_extraction", time.monotonic() - t0, chunk_number=chunk_num)
-        all_entities.extend(entities)
-        print(f"  ✓ Entities:      {len(entities)}")
-
-        entity_names = [e.get('entity', '') for e in entities if e.get('entity')]
-        t0 = time.monotonic()
         triples = relationship_extractor.extract(
             chunk,
-            entity_names,
+            canonical_names,   # resolved, canonical names
             progress_label=f"chunk {chunk_num}/{total_chunks} · relationships",
         )
-        bench.record_llm_call(run_id, "relationship_extraction", time.monotonic() - t0, chunk_number=chunk_num)
+        elapsed_llm = time.monotonic() - t0
+        bench.record_llm_call(run_id, "relationship_extraction", elapsed_llm, chunk_number=chunk_num)
+
         for t in triples:
-            key = (t.get('subject', ''), t.get('predicate', ''), t.get('object', ''))
+            # Correct subject/object to canonical form where possible
+            subj = t.get('subject', '')
+            obj = t.get('object', '')
+            canonical_subj = canonical_lookup.get(subj.lower(), subj)
+            canonical_obj = canonical_lookup.get(obj.lower(), obj)
+            t = {**t, 'subject': canonical_subj, 'object': canonical_obj}
+
+            key = (t['subject'], t.get('predicate', ''), t['object'])
             if key not in all_triples_set:
                 all_triples_set.add(key)
                 all_triples.append(t)
+
         elapsed = time.monotonic() - chunk_start
         chunk_times.append(elapsed)
         print(f"  ✓ Relationships: {len(triples)}  ({elapsed:.1f}s)")
         bench.record_chunk(
             run_id, chunk_num,
             word_count=len(chunk.split()),
-            entities=len(entities),
+            entities=chunk_entity_counts[i],
             relationships=len(triples),
             elapsed_s=elapsed,
         )
 
-    # Deduplicate entities — prefer a non-'Other' type if seen in any chunk.
-    unique_entities: dict = {}
-    for entity in all_entities:
-        name = entity.get('entity', '')
-        if not name:
-            continue
-        existing = unique_entities.get(name)
-        if existing is None or existing.get('type', 'Other') == 'Other':
-            unique_entities[name] = entity
-
-    entities_raw = len(unique_entities)
-    print(f"\nTotal unique entities: {entities_raw}")
-    print(f"Total unique triples:  {len(all_triples)}")
-
-    # Entity resolution pass (if enabled in config)
-    if app_config.entity_resolution.enabled:
-        print(f"\nRunning entity resolution ({', '.join(app_config.entity_resolution.strategies)})...")
-        t0 = time.monotonic()
-        resolver = EntityResolver(app_config.entity_resolution, llm_client=None)
-        resolved_list = resolver.resolve(list(unique_entities.values()))
-        unique_entities = {e['entity']: e for e in resolved_list}
-        bench.record_resolution(
-            run_id, "+".join(app_config.entity_resolution.strategies),
-            entities_before=entities_raw,
-            entities_after=len(unique_entities),
-            elapsed_s=time.monotonic() - t0,
-        )
-        print(f"  After resolution: {len(unique_entities)} entities")
+    print(f"\nTotal unique triples: {len(all_triples)}")
 
     # Step 1: Generate TTL knowledge graph.
     print(f"\n1. Generating knowledge graph (TTL)...")
