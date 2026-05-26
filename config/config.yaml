@@ -50,11 +50,12 @@ visualization:
 
 # Entity Resolution (post-extraction deduplication pass)
 entity_resolution:
-  enabled: false
+  enabled: true
   # Strategies applied in order: rule_based | embedding | llm
   strategies:
     - rule_based
     - embedding
+    - llm
   # Cosine similarity threshold for embedding-based matching (0–1).
   # 0.92 catches name variants (John / John Smith / Mr Smith) with low false-positive rate.
   # Use 0.95+ for conservative matching, 0.88–0.90 with llm_confirmation: true for aggressive.
