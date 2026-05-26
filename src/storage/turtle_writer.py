@@ -65,6 +65,7 @@ class TurtleWriter:
 
         # Build entity-name → type map and ensure approved classes exist.
         entity_types: Dict[str, str] = {}
+        entity_alternate_names: Dict[str, list] = {}
         if entities:
             for entity in entities:
                 name = entity.get('entity', '').strip()
@@ -72,6 +73,7 @@ class TurtleWriter:
                 if name:
                     canonical = self.ontology_manager.normalise_type(etype)
                     entity_types[name] = canonical
+                    entity_alternate_names[name] = entity.get('alternate_names', [])
                     self.ontology_manager.ensure_approved_class(canonical)
 
         # All names known to be entities (subjects from extractor + entity list).
@@ -127,14 +129,17 @@ class TurtleWriter:
                 graph.add((subj_uri, DOC.sourceDocument, doc_uri))
                 written_entity_uris.add(subj_uri)
 
-        # Ensure every extracted entity has a sourceDocument link and rdf:type,
-        # even if it never appeared as a subject/object in any relationship triple.
+        # Ensure every extracted entity has a sourceDocument link, rdf:type,
+        # and alternate names — even if never in a relationship triple.
         for name, canonical_type in entity_types.items():
             uri = create_entity_uri(name)
             graph.add((uri, DOC.sourceDocument, doc_uri))
             type_uri = self.ontology_manager.get_ontology_class_uri(canonical_type)
             graph.add((uri, RDF.type, type_uri))
             written_entity_uris.add(uri)
+            # Write alternate name variants as kg:alternateName literals
+            for alt in entity_alternate_names.get(name, []):
+                graph.add((uri, KG.alternateName, Literal(alt)))
 
         # Persist KG file.
         filepath = self.output_dir / f"{document_id}.ttl"

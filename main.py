@@ -221,8 +221,11 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
 
     # Canonical entity names to feed to relationship extractor
     canonical_names = list(unique_entities.keys())
-    # Case-insensitive lookup: lowercase → canonical name
+    # Case-insensitive lookup: includes canonical names AND their alternate names
     canonical_lookup = {name.lower(): name for name in canonical_names}
+    for entity in unique_entities.values():
+        for alt in entity.get('alternate_names', []):
+            canonical_lookup[alt.lower()] = entity['entity']
 
     # ── Pass 2: relationship extraction using canonical entity names ───────
     print(f"\n{'═' * 50}")

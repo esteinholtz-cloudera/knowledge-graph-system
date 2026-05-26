@@ -62,7 +62,14 @@ class EntityResolver:
           - Strip common prefixes ("The King" → "King")
         """
         names = list(canonical_map.keys())
-        name_set_lower = {n.lower(): n for n in names}
+        # Build lowercase → name map, preferring non-ALL_CAPS forms when there
+        # are multiple names that differ only by case (e.g. Hamlet wins over HAMLET).
+        name_set_lower: dict = {}
+        for n in names:
+            key = n.lower()
+            existing = name_set_lower.get(key)
+            if existing is None or existing.isupper():
+                name_set_lower[key] = n
 
         hints = {k.lower(): v for k, v in self._settings.abbreviation_hints.items()}
 
@@ -307,8 +314,13 @@ class EntityResolver:
         return names[0]
 
     def _merge(self, entities: List[Dict], canonical_map: Dict[str, str]) -> List[Dict]:
-        """Apply canonical_map to entity list, merging duplicates."""
+        """Apply canonical_map to entity list, merging duplicates.
+
+        Each output entity gains an 'alternate_names' list containing the raw
+        variant names that were merged into it (excluding the canonical name itself).
+        """
         merged: Dict[str, Dict] = {}
+        variants: Dict[str, set] = {}  # canonical → set of raw names
 
         for entity in entities:
             raw = entity.get("entity", "")
@@ -323,12 +335,22 @@ class EntityResolver:
 
             if canonical not in merged:
                 merged[canonical] = {**entity, "entity": canonical}
+                variants[canonical] = set()
             else:
                 # Merge type: prefer non-Other
                 existing_type = merged[canonical].get("type", "Other")
                 new_type = entity.get("type", "Other")
                 if existing_type == "Other" and new_type != "Other":
                     merged[canonical]["type"] = new_type
+
+            # Record the raw name as a variant if it differs from canonical
+            if raw != canonical:
+                variants[canonical].add(raw)
+
+        # Attach alternate_names to each entity (sorted for determinism)
+        for canonical, entity in merged.items():
+            alts = sorted(variants.get(canonical, set()))
+            entity["alternate_names"] = alts
 
         result = list(merged.values())
         if len(result) < len(entities):
