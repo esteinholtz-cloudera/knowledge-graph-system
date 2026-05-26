@@ -1,17 +1,13 @@
 """
 End-to-end pipeline tests for each document in data/documents/.
 
-Each test class:
-  1. Redirects KG output to a temporary directory (cleaned up automatically).
-  2. Deletes the generated HTML markup and any metadata entry after the class run.
+Generated files (TTL, HTML markup, metadata entry) are kept after the run
+by default, for inspection. Pass --cleanup to remove them automatically:
 
-So running this test suite leaves the repository in the same state as before.
+    uv run pytest test/test_document_pipeline.py -v           # keep outputs
+    uv run pytest test/test_document_pipeline.py -v --cleanup # auto-remove
 
-Run with:
-    uv run pytest test/test_document_pipeline.py -v
-
-These tests call the real LLM (configured in config/config.yaml), so they
-require the configured provider to be reachable (e.g. LM Studio running).
+Requires the configured LLM provider to be reachable (see config/config.yaml).
 """
 import json
 import sys
@@ -26,23 +22,27 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from main import process_and_extract  # noqa: E402
 
+KG_OUTPUT_DIR = str(PROJECT_ROOT / "data" / "knowledge_graphs")
+
 
 # ---------------------------------------------------------------------------
-# Shared helpers
+# Pytest option
 # ---------------------------------------------------------------------------
 
-def _run_pipeline(doc_filename: str, tmp_kg_dir: Path) -> dict:
-    """Run the full pipeline on a document; KGs go into tmp_kg_dir."""
-    doc_path = PROJECT_ROOT / "data" / "documents" / doc_filename
-    assert doc_path.exists(), f"Document not found: {doc_path}"
-    return process_and_extract(
-        file_path=str(doc_path),
-        output_dir=str(tmp_kg_dir),
+def pytest_addoption(parser):
+    parser.addoption(
+        "--cleanup",
+        action="store_true",
+        default=False,
+        help="Remove generated TTL, HTML and metadata entries after each test class.",
     )
 
 
+# ---------------------------------------------------------------------------
+# Cleanup helpers
+# ---------------------------------------------------------------------------
+
 def _remove_metadata_entry(document_id: str):
-    """Delete a document's entry from data/metadata.json, if it exists."""
     meta_path = PROJECT_ROOT / "data" / "metadata.json"
     if not meta_path.exists():
         return
@@ -53,21 +53,28 @@ def _remove_metadata_entry(document_id: str):
             del docs[document_id]
             data["documents"] = docs
             meta_path.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False),
-                encoding="utf-8",
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
             )
     except (json.JSONDecodeError, IOError):
         pass
 
 
-def _cleanup_generated_files(result: Optional[dict]):
-    """Remove HTML markup and metadata entry created during a test run."""
+def _cleanup(result: Optional[dict]):
     if result is None:
         return
-    markup = Path(result["markup_path"])
-    if markup.exists():
-        markup.unlink()
+    Path(result["markup_path"]).unlink(missing_ok=True)
+    Path(result["kg_path"]).unlink(missing_ok=True)
     _remove_metadata_entry(result["document_id"])
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _run_pipeline(doc_filename: str) -> dict:
+    doc_path = PROJECT_ROOT / "data" / "documents" / doc_filename
+    assert doc_path.exists(), f"Document not found: {doc_path}"
+    return process_and_extract(file_path=str(doc_path), output_dir=KG_OUTPUT_DIR)
 
 
 def _assert_ttl_valid(ttl_path: str):
@@ -90,10 +97,10 @@ class TestSkillsDescription:
     """Pipeline tests for Skills_description.txt."""
 
     @pytest.fixture(scope="class")
-    def result(self, tmp_path_factory, request):
-        tmp_kg_dir = tmp_path_factory.mktemp("kg_skills")
-        res = _run_pipeline("Skills_description.txt", tmp_kg_dir)
-        request.addfinalizer(lambda: _cleanup_generated_files(res))
+    def result(self, request):
+        res = _run_pipeline("Skills_description.txt")
+        if request.config.getoption("--cleanup"):
+            request.addfinalizer(lambda: _cleanup(res))
         return res
 
     def test_entities_extracted(self, result):
@@ -147,10 +154,10 @@ class TestAgenticAI:
     """Pipeline tests for AgenticAI.txt."""
 
     @pytest.fixture(scope="class")
-    def result(self, tmp_path_factory, request):
-        tmp_kg_dir = tmp_path_factory.mktemp("kg_agentic")
-        res = _run_pipeline("AgenticAI.txt", tmp_kg_dir)
-        request.addfinalizer(lambda: _cleanup_generated_files(res))
+    def result(self, request):
+        res = _run_pipeline("AgenticAI.txt")
+        if request.config.getoption("--cleanup"):
+            request.addfinalizer(lambda: _cleanup(res))
         return res
 
     def test_entities_extracted(self, result):
@@ -199,10 +206,10 @@ class TestMCP:
     """Pipeline tests for MCP.txt."""
 
     @pytest.fixture(scope="class")
-    def result(self, tmp_path_factory, request):
-        tmp_kg_dir = tmp_path_factory.mktemp("kg_mcp")
-        res = _run_pipeline("MCP.txt", tmp_kg_dir)
-        request.addfinalizer(lambda: _cleanup_generated_files(res))
+    def result(self, request):
+        res = _run_pipeline("MCP.txt")
+        if request.config.getoption("--cleanup"):
+            request.addfinalizer(lambda: _cleanup(res))
         return res
 
     def test_entities_extracted(self, result):

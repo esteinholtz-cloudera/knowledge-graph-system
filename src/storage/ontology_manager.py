@@ -207,12 +207,13 @@ class OntologyManager:
         """
         if not self.proposed_file.exists():
             return 0
-        import shutil
-        shutil.copy2(self.proposed_file, self.ontology_file)
+        # Parse the proposal file and re-serialize cleanly (strips header comments).
+        approved = Graph()
+        approved.parse(str(self.proposed_file), format='turtle')
+        approved.serialize(destination=str(self.ontology_file), format='turtle')
         self.proposed_file.unlink()
         # Reload the approved graph.
-        self.graph = Graph()
-        self.graph.parse(str(self.ontology_file), format='turtle')
+        self.graph = approved
         return len(self._proposals)
 
     # ------------------------------------------------------------------

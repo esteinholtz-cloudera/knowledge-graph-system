@@ -33,37 +33,31 @@ class HTMLMarkupGenerator:
         self,
         text: str,
         ttl_file_path: str,
-        document_filename: str = "document"
+        document_filename: str = "document",
+        graph_html_filename: Optional[str] = None,
     ) -> str:
         """
         Generate HTML markup with entities highlighted, reading entities from TTL file.
-        
+
         Args:
             text: Original document text
             ttl_file_path: Path to the Turtle file containing the knowledge graph
             document_filename: Original document filename (for title)
-            
+            graph_html_filename: Exact filename (not path) of the graph HTML file to
+                link to. If None, inferred from document_filename stem as a fallback.
+
         Returns:
             Complete HTML document as string
         """
-        # Parse TTL file to extract entities
         entities = self._extract_entities_from_ttl(ttl_file_path)
-        
-        # Get unique entities, prioritizing longer names
         unique_entities = self._deduplicate_entities(entities)
-        
-        # Find all entity matches in text
         matches = self._find_entity_matches(text, unique_entities)
-        
-        # Sort matches by position, handling overlaps
         sorted_matches = self._resolve_overlaps(matches)
-        
-        # Build marked-up text
         marked_text = self._apply_markup(text, sorted_matches, unique_entities)
-        
-        # Generate complete HTML document
-        html_doc = self._generate_html_document(marked_text, unique_entities, document_filename, ttl_file_path)
-        
+        html_doc = self._generate_html_document(
+            marked_text, unique_entities, document_filename,
+            ttl_file_path, graph_html_filename=graph_html_filename,
+        )
         return html_doc
     
     def generate_markup(
@@ -384,7 +378,8 @@ class HTMLMarkupGenerator:
         marked_text: str,
         entities: Dict[str, Dict],
         document_filename: str,
-        ttl_file_path: Optional[str] = None
+        ttl_file_path: Optional[str] = None,
+        graph_html_filename: Optional[str] = None,
     ) -> str:
         """
         Generate complete HTML document with styling.
@@ -410,11 +405,24 @@ class HTMLMarkupGenerator:
         # Build entity list HTML
         entity_list_html = self._generate_entity_list(entities)
         
-        # Build TTL file link if available
+        # Link to the interactive graph visualisation (same directory, relative href).
+        # Use the explicitly passed filename; fall back to stem inference only as a last resort.
         ttl_link_html = ""
-        if ttl_file_path:
-            ttl_file_path_escaped = html.escape(ttl_file_path)
-            ttl_link_html = f'<div style="margin-top: 10px;"><a href="file://{ttl_file_path_escaped}" target="_blank" style="color: #4A90E2; text-decoration: none;">📄 View Knowledge Graph (TTL)</a></div>'
+        if graph_html_filename:
+            graph_href = graph_html_filename
+        elif document_filename:
+            # Fallback: infer from document stem (may not match if paths diverge)
+            graph_href = f"{Path(document_filename).stem}_graph.html"
+        else:
+            graph_href = None
+
+        if graph_href:
+            ttl_link_html = (
+                f'<div style="margin-top: 10px;">'
+                f'<a href="{html.escape(graph_href)}" target="_blank" '
+                f'style="color: #4A90E2; text-decoration: none;">🔗 View Knowledge Graph</a>'
+                f'</div>'
+            )
         
         html_template = f"""<!DOCTYPE html>
 <html lang="en">

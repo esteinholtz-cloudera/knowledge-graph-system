@@ -14,5 +14,6 @@ class LLMProviderBase(ABC):
         temperature: float = 0.3,
         max_new_tokens: int = 1024,
         system_prompt: Optional[str] = None,
+        progress_label: Optional[str] = None,
     ) -> str:
         """Generate text from a prompt."""

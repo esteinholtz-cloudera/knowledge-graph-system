@@ -58,8 +58,34 @@ uv run python main.py process data/documents/my-doc.txt
 
 The pipeline:
 
-1. Builds a **knowledge graph** (`.ttl`) with entities, relationships, and `rdf:type` links to the ontology  
-2. Writes **HTML markup** with entities highlighted (`data/documents/my-doc_markup.html`)
+```
+Document
+  │
+  ▼
+DocumentProcessor  ── chunk text (chunk_size / overlap)
+  │
+  ├─ EntityExtractor      ── LLM → named entities with types
+  │
+  ├─ RelationshipExtractor── LLM → subject–predicate–object triples
+  │
+  ├─ EntityResolver       ── optional deduplication pass
+  │    ├─ rule_based      ── ALL_CAPS→Title Case, abbreviation hints
+  │    ├─ embedding       ── cosine similarity (nomic-embed-text)
+  │    └─ llm             ── LLM coreference confirmation
+  │
+  ├─ TurtleWriter         ── RDF Turtle (.ttl)
+  │    ├─ entities → kg: URIs with rdf:type → ont: classes
+  │    ├─ non-entity objects → Literals
+  │    └─ new types → ontology_proposed.ttl (awaiting approval)
+  │
+  └─ HTMLMarkupGenerator  ── reads TTL → annotated HTML markup
+```
+
+Outputs for `my-doc.txt`:
+
+1. **Knowledge graph** `data/knowledge_graphs/<hash>.ttl` — entities, triples, `rdf:type` ontology links
+2. **HTML markup** `data/documents/my-doc_markup.html` — document with entities highlighted, linked to the graph
+3. **Ontology proposals** `data/ontology/ontology_proposed.ttl` — new classes for human review (if any)
 
 ### 5. Check the outputs
 
@@ -121,14 +147,22 @@ knowledge-graph-system/
 - Text, Markdown, PDF, and Word input
 - Configurable LLM: Ollama, LM Studio, OpenAI, Anthropic, Gemini
 - RDF Turtle knowledge graphs with local ontology (`rdf:type`)
-- HTML document markup generated from the TTL
+- Entity resolution pass: rule-based, embedding similarity, LLM coreference
+- HTML document markup generated from the TTL, linked to an interactive graph view
+- Ontology proposal workflow — new classes require human approval before being added
 - n8n HTTP API (`python main.py server`)
 
 ## CLI reference
 
 ```bash
-# Full pipeline: TTL then HTML
+# Full pipeline (pre-flight check, TTL, HTML markup)
 uv run python main.py process <path-to-document>
+
+# Limit chunks for quick testing on long documents
+uv run python main.py process <path-to-document> --max-chunks 3
+
+# Approve proposed ontology additions after reviewing ontology_proposed.ttl
+uv run python main.py ontology approve
 
 # n8n integration server
 uv run python main.py server --port 5000
@@ -140,9 +174,10 @@ Supported inputs: `.txt`, `.md`, `.pdf`, `.docx`.
 
 [`config/config.yaml`](config/config.yaml) controls:
 
-- **llm** — provider, model, `base_url`, `api_key_env`, generation limits  
-- **document** — `chunk_size`, `overlap`  
-- **storage** — directories for graphs, documents, ontology  
+- **llm** — provider, model, `base_url`, `api_key_env`, `disable_thinking`, generation limits
+- **document** — `chunk_size`, `overlap`
+- **storage** — directories for graphs, documents, ontology
+- **entity_resolution** — `enabled`, `strategies` (rule_based / embedding / llm), `embedding_threshold`, `abbreviation_hints`
 
 API keys belong in the environment only (never in YAML). Copy [`.env.example`](.env.example) as a reminder.
 

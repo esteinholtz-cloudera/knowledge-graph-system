@@ -30,6 +30,10 @@ ont:Person a owl:Class ;
     rdfs:label "Person" ;
     rdfs:comment "A human being or individual" .
 
+ont:Platform a owl:Class ;
+    rdfs:label "Platform" ;
+    rdfs:comment "Proposed from: test_ontology_document.txt (triple: Cloudera Machine Learning is platform)" .
+
 ont:Product a owl:Class ;
     rdfs:label "Product" ;
     rdfs:comment "A product or service" .
