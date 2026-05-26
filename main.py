@@ -126,10 +126,10 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
 
     processor = DocumentProcessor()
     doc_data = processor.process_document(file_path)
-    document_id = doc_data['hash']
+    document_id = Path(doc_data['filename']).stem  # e.g. "Skills_description"
 
-    print(f"Document ID: {document_id}")
-    print(f"Word count:  {doc_data['word_count']}")
+    print(f"Document:   {doc_data['filename']}")
+    print(f"Word count: {doc_data['word_count']}")
 
     chunks = processor.chunk_text(doc_data['text'])
     if max_chunks and len(chunks) > max_chunks:
