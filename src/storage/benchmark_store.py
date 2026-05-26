@@ -48,8 +48,15 @@ CREATE TABLE IF NOT EXISTS runs (
     llm_provider      TEXT,
     llm_model         TEXT,
     resolution_enabled BOOLEAN,
-    resolution_strategies TEXT,
     proposals         INTEGER
+);
+
+-- Normalized: one row per strategy per run (replaces CSV in runs.resolution_strategies)
+CREATE TABLE IF NOT EXISTS run_strategies (
+    run_id    TEXT,
+    position  INTEGER,   -- preserves execution order
+    strategy  TEXT,
+    PRIMARY KEY (run_id, position)
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -73,13 +80,13 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     tokens_out_approx INTEGER
 );
 
+-- merges removed: computed as (entities_before - entities_after) in queries
 CREATE TABLE IF NOT EXISTS resolution_runs (
     id                INTEGER,
     run_id            TEXT,
     strategy          TEXT,
     entities_before   INTEGER,
     entities_after    INTEGER,
-    merges            INTEGER,
     elapsed_s         DOUBLE
 );
 
@@ -164,9 +171,9 @@ class BenchmarkStore:
             INSERT INTO runs (
                 run_id, started_at, document_filename, document_id,
                 word_count, max_chunks, llm_provider, llm_model,
-                resolution_enabled, resolution_strategies,
+                resolution_enabled,
                 entities_raw, entities_resolved, triples, proposals
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0)
             """,
             [
                 run_id,
@@ -178,9 +185,14 @@ class BenchmarkStore:
                 llm_provider,
                 llm_model,
                 resolution_enabled,
-                ",".join(resolution_strategies),
             ],
         )
+        # Strategies in normalized table — one row per strategy, ordered
+        for pos, strategy in enumerate(resolution_strategies):
+            self._con.execute(
+                "INSERT INTO run_strategies (run_id, position, strategy) VALUES (?, ?, ?)",
+                [run_id, pos, strategy],
+            )
         return run_id
 
     def finish_run(
@@ -273,15 +285,14 @@ class BenchmarkStore:
         entities_after: int,
         elapsed_s: float,
     ):
-        merges = entities_before - entities_after
         self._con.execute(
             """
             INSERT INTO resolution_runs (id, run_id, strategy,
                                          entities_before, entities_after,
-                                         merges, elapsed_s)
-            VALUES (nextval('seq_res'), ?, ?, ?, ?, ?, ?)
+                                         elapsed_s)
+            VALUES (nextval('seq_res'), ?, ?, ?, ?, ?)
             """,
-            [run_id, strategy, entities_before, entities_after, merges, elapsed_s],
+            [run_id, strategy, entities_before, entities_after, elapsed_s],
         )
 
     # ------------------------------------------------------------------
@@ -292,7 +303,7 @@ class BenchmarkStore:
         return self._con.sql(sql)
 
     def clear(self):
-        for table in ("resolution_runs", "llm_calls", "chunks", "runs"):
+        for table in ("resolution_runs", "llm_calls", "chunks", "run_strategies", "runs"):
             self._con.execute(f"DELETE FROM {table}")
 
     def close(self):
@@ -304,17 +315,21 @@ class BenchmarkStore:
 
     SUMMARY_SQL = """
         SELECT
-            strftime(started_at, '%Y-%m-%d %H:%M') AS started,
-            document_filename                        AS document,
-            chunk_count                              AS chunks,
-            entities_raw                             AS entities,
-            entities_resolved                        AS resolved,
+            strftime(started_at, '%Y-%m-%d %H:%M')  AS started,
+            document_filename                         AS document,
+            chunk_count                               AS chunks,
+            entities_raw                              AS entities,
+            entities_resolved                         AS resolved,
             triples,
             proposals,
-            round(elapsed_s, 1)                      AS elapsed_s,
-            llm_model                                AS model,
-            CASE WHEN resolution_enabled THEN resolution_strategies ELSE 'off' END AS resolution
-        FROM runs
+            round(elapsed_s, 1)                       AS elapsed_s,
+            llm_model                                 AS model,
+            CASE WHEN resolution_enabled
+                 THEN (SELECT string_agg(strategy, '→' ORDER BY position)
+                       FROM run_strategies rs WHERE rs.run_id = r.run_id)
+                 ELSE 'off'
+            END                                       AS resolution
+        FROM runs r
         ORDER BY started_at DESC
         LIMIT 20
     """
