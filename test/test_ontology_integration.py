@@ -69,7 +69,7 @@ def test_ontology_integration():
     # Step 2: Generate TTL with ontology
     print("\n2. Generating TTL file with ontology typing...")
     writer = TurtleWriter(output_dir="data/knowledge_graphs")
-    kg_path = writer.write_knowledge_graph(
+    kg_path, _ = writer.write_knowledge_graph(
         document_id=document_id,
         triples=triples,
         document_metadata=document_metadata,

@@ -43,7 +43,7 @@ def test_turtle_generation():
     print("\nGenerating Turtle file...")
     writer = TurtleWriter(output_dir="data/knowledge_graphs")
     
-    kg_path = writer.write_knowledge_graph(
+    kg_path, _ = writer.write_knowledge_graph(
         document_id=document_id,
         triples=triples,
         document_metadata=document_metadata

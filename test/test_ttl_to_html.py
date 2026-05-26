@@ -48,7 +48,7 @@ def test_ttl_to_html():
     # Step 1: Generate TTL file
     print("\n1. Generating TTL file...")
     writer = TurtleWriter(output_dir="data/knowledge_graphs")
-    kg_path = writer.write_knowledge_graph(
+    kg_path, _ = writer.write_knowledge_graph(
         document_id=document_id,
         triples=triples,
         document_metadata=document_metadata
