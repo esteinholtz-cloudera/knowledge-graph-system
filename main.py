@@ -192,15 +192,53 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         chunk_times.append(elapsed)
         print(f"  ✓ Entities: {len(entities)}  ({elapsed:.1f}s)")
 
-    # Deduplicate and resolve entities before relationship extraction
-    unique_entities: dict = {}
+    # Deduplicate entities using case-insensitive key so HAMLET, HAmlet, hamlet
+    # all collapse to the same canonical entry. Keep track of raw variants as
+    # alternate_names. Prefer title-case form; fall back to first non-all-caps seen.
+    _ci: dict = {}  # lowercase_key → entity dict
+    def _best_form(name: str) -> str:
+        """Return the best canonical display form for a name.
+        - ALL_CAPS proper names (4+ chars): Title Case  (HAMLET → Hamlet)
+        - ALL_CAPS abbreviations (< 4 chars): keep   (LLM, RAG)
+        - mixed-case / already title: keep as-is
+        """
+        if name.isupper() and len(name) >= 4:
+            return name.title()
+        return name
+
+    def _form_rank(name: str) -> int:
+        """Higher = better canonical form.
+        mixed-case (Hamlet, LLM) = 1 > all-lowercase (hamlet) = 0.
+        """
+        return 0 if name == name.lower() else 1
+
     for entity in all_entities:
         name = entity.get('entity', '')
         if not name:
             continue
-        existing = unique_entities.get(name)
-        if existing is None or existing.get('type', 'Other') == 'Other':
-            unique_entities[name] = entity
+        key = name.lower()
+        canonical = _best_form(name)
+        existing = _ci.get(key)
+        if existing is None:
+            _ci[key] = {**entity, 'entity': canonical, 'alternate_names': set()}
+        else:
+            current = existing['entity']
+            # Upgrade to better display form if available
+            if _form_rank(canonical) > _form_rank(current):
+                existing['alternate_names'].add(current)
+                existing['entity'] = canonical
+            # Prefer non-Other type
+            if existing.get('type', 'Other') == 'Other' and entity.get('type', 'Other') != 'Other':
+                existing['type'] = entity['type']
+        # Record raw name as alternate if it differs from the stored canonical
+        if _ci[key]['entity'] != name:
+            _ci[key]['alternate_names'].add(name)
+
+    # Convert alternate_names sets to sorted lists for determinism
+    unique_entities: dict = {}
+    for entry in _ci.values():
+        entry['alternate_names'] = sorted(entry['alternate_names'])
+        unique_entities[entry['entity']] = entry
 
     entities_raw = len(unique_entities)
     print(f"\nTotal unique entities (raw): {entities_raw}")
