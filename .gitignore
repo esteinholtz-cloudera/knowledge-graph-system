@@ -38,6 +38,8 @@ data/knowledge_graphs/*.ttl
 data/metadata.json
 data/documents/*
 data/ontology/ontology_proposed.ttl
+data/benchmark.duckdb
+data/benchmark.duckdb.wal
 
 # Keep directory structure
 !data/knowledge_graphs/.gitkeep
