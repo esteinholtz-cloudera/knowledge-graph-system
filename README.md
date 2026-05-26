@@ -190,6 +190,10 @@ With the server running:
 - `POST /extract/entities`, `POST /extract/relationships`, `POST /store`
 - `GET /metadata`, `GET /metadata/<document_id>`
 
+## Benchmarking
+
+Pipeline metrics (entity counts, LLM timings, resolution results) are recorded to a local DuckDB database. See [docs/Benchmark.md](docs/Benchmark.md) for the schema, CLI, and example queries.
+
 ## License
 
 See LICENSE file for details.
