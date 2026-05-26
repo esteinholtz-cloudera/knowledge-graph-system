@@ -12,19 +12,35 @@ SCHEMA = Namespace("http://schema.org/")
 ONT = Namespace("http://example.org/ontology/")  # Local ontology namespace
 
 
+def normalise_entity_name(entity_name: str) -> str:
+    """
+    Normalise an entity name for consistent URI generation.
+
+    ALL_CAPS words are converted to Title Case so that HAMLET and Hamlet
+    produce the same URI.  Mixed-case names (e.g. "LLM", "iPhone") are
+    left unchanged.
+    """
+    words = entity_name.strip().split()
+    normalised = []
+    for word in words:
+        # Convert ALL-CAPS words of 4+ chars (proper names like HAMLET, KING).
+        # Short ALL-CAPS (LLM, RAG, API, ...) are preserved as-is.
+        if word.isalpha() and word.isupper() and len(word) >= 4:
+            normalised.append(word.title())
+        else:
+            normalised.append(word)
+    return " ".join(normalised)
+
+
 def create_entity_uri(entity_name: str, namespace: Namespace = KG) -> URIRef:
     """
     Create a URI for an entity.
-    
-    Args:
-        entity_name: Name of the entity
-        namespace: RDF namespace to use
-        
-    Returns:
-        URIRef for the entity
+
+    Entity names are normalised (ALL_CAPS → Title Case) before URI generation
+    so that HAMLET and Hamlet resolve to the same kg:Hamlet URI.
     """
-    # Sanitize entity name for URI
-    sanitized = quote(entity_name.strip().replace(' ', '_'), safe='')
+    normalised = normalise_entity_name(entity_name)
+    sanitized = quote(normalised.replace(' ', '_'), safe='')
     return namespace[sanitized]
 
 
