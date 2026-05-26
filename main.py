@@ -126,10 +126,10 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
 
     processor = DocumentProcessor()
     doc_data = processor.process_document(file_path)
-    document_id = doc_data['hash']
+    document_id = Path(doc_data['filename']).stem  # e.g. "Skills_description"
 
-    print(f"Document ID: {document_id}")
-    print(f"Word count:  {doc_data['word_count']}")
+    print(f"Document:   {doc_data['filename']}")
+    print(f"Word count: {doc_data['word_count']}")
 
     chunks = processor.chunk_text(doc_data['text'])
     if max_chunks and len(chunks) > max_chunks:
@@ -156,15 +156,125 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
     entity_extractor = EntityExtractor()
     relationship_extractor = RelationshipExtractor()
 
-    all_entities = []
-    all_triples_set = set()  # deduplicate as (subject, predicate, object) tuples
-    all_triples = []
     total_chunks = len(chunks)
     chunk_times: list = []
 
+    # ── Pass 1: entity extraction across all chunks ───────────────────────
+    print(f"\n{'═' * 50}")
+    print(f"  Pass 1 of 2 — Entity extraction")
+    print(f"{'═' * 50}")
+    all_entities = []
+    chunk_entity_counts = []
+
     for i, chunk in enumerate(chunks):
         chunk_num = i + 1
-        # ETA based on average of completed chunks
+        if chunk_times:
+            avg = sum(chunk_times) / len(chunk_times)
+            remaining = avg * (total_chunks - i)
+            m, s = divmod(int(remaining), 60)
+            eta_str = f"  ETA ~{m}m{s:02d}s" if m else f"  ETA ~{s}s"
+        else:
+            eta_str = ""
+
+        print(f"\n{'─' * 50}")
+        print(f"  Chunk {chunk_num}/{total_chunks}{eta_str}")
+        print(f"{'─' * 50}")
+        t0 = time.monotonic()
+
+        entities = entity_extractor.extract(
+            chunk,
+            progress_label=f"chunk {chunk_num}/{total_chunks} · entities",
+        )
+        elapsed = time.monotonic() - t0
+        bench.record_llm_call(run_id, "entity_extraction", elapsed, chunk_number=chunk_num)
+        all_entities.extend(entities)
+        chunk_entity_counts.append(len(entities))
+        chunk_times.append(elapsed)
+        print(f"  ✓ Entities: {len(entities)}  ({elapsed:.1f}s)")
+
+    # Deduplicate entities using case-insensitive key so HAMLET, HAmlet, hamlet
+    # all collapse to the same canonical entry. Keep track of raw variants as
+    # alternate_names. Prefer title-case form; fall back to first non-all-caps seen.
+    _ci: dict = {}  # lowercase_key → entity dict
+    def _best_form(name: str) -> str:
+        """Return the best canonical display form for a name.
+        - ALL_CAPS proper names (4+ chars): Title Case  (HAMLET → Hamlet)
+        - ALL_CAPS abbreviations (< 4 chars): keep   (LLM, RAG)
+        - mixed-case / already title: keep as-is
+        """
+        if name.isupper() and len(name) >= 4:
+            return name.title()
+        return name
+
+    def _form_rank(name: str) -> int:
+        """Higher = better canonical form.
+        mixed-case (Hamlet, LLM) = 1 > all-lowercase (hamlet) = 0.
+        """
+        return 0 if name == name.lower() else 1
+
+    for entity in all_entities:
+        name = entity.get('entity', '')
+        if not name:
+            continue
+        key = name.lower()
+        canonical = _best_form(name)
+        existing = _ci.get(key)
+        if existing is None:
+            _ci[key] = {**entity, 'entity': canonical, 'alternate_names': set()}
+        else:
+            current = existing['entity']
+            # Upgrade to better display form if available
+            if _form_rank(canonical) > _form_rank(current):
+                existing['alternate_names'].add(current)
+                existing['entity'] = canonical
+            # Prefer non-Other type
+            if existing.get('type', 'Other') == 'Other' and entity.get('type', 'Other') != 'Other':
+                existing['type'] = entity['type']
+        # Record raw name as alternate if it differs from the stored canonical
+        if _ci[key]['entity'] != name:
+            _ci[key]['alternate_names'].add(name)
+
+    # Convert alternate_names sets to sorted lists for determinism
+    unique_entities: dict = {}
+    for entry in _ci.values():
+        entry['alternate_names'] = sorted(entry['alternate_names'])
+        unique_entities[entry['entity']] = entry
+
+    entities_raw = len(unique_entities)
+    print(f"\nTotal unique entities (raw): {entities_raw}")
+
+    if app_config.entity_resolution.enabled:
+        print(f"\nRunning entity resolution ({', '.join(app_config.entity_resolution.strategies)})...")
+        t0 = time.monotonic()
+        resolver = EntityResolver(app_config.entity_resolution, llm_client=None)
+        resolved_list = resolver.resolve(list(unique_entities.values()))
+        unique_entities = {e['entity']: e for e in resolved_list}
+        bench.record_resolution(
+            run_id, "+".join(app_config.entity_resolution.strategies),
+            entities_before=entities_raw,
+            entities_after=len(unique_entities),
+            elapsed_s=time.monotonic() - t0,
+        )
+        print(f"  After resolution: {len(unique_entities)} entities")
+
+    # Canonical entity names to feed to relationship extractor
+    canonical_names = list(unique_entities.keys())
+    # Case-insensitive lookup: includes canonical names AND their alternate names
+    canonical_lookup = {name.lower(): name for name in canonical_names}
+    for entity in unique_entities.values():
+        for alt in entity.get('alternate_names', []):
+            canonical_lookup[alt.lower()] = entity['entity']
+
+    # ── Pass 2: relationship extraction using canonical entity names ───────
+    print(f"\n{'═' * 50}")
+    print(f"  Pass 2 of 2 — Relationship extraction")
+    print(f"{'═' * 50}")
+    all_triples_set: set = set()
+    all_triples = []
+    chunk_times = []
+
+    for i, chunk in enumerate(chunks):
+        chunk_num = i + 1
         if chunk_times:
             avg = sum(chunk_times) / len(chunk_times)
             remaining = avg * (total_chunks - i)
@@ -179,66 +289,39 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         chunk_start = time.monotonic()
 
         t0 = time.monotonic()
-        entities = entity_extractor.extract(
-            chunk,
-            progress_label=f"chunk {chunk_num}/{total_chunks} · entities",
-        )
-        bench.record_llm_call(run_id, "entity_extraction", time.monotonic() - t0, chunk_number=chunk_num)
-        all_entities.extend(entities)
-        print(f"  ✓ Entities:      {len(entities)}")
-
-        entity_names = [e.get('entity', '') for e in entities if e.get('entity')]
-        t0 = time.monotonic()
         triples = relationship_extractor.extract(
             chunk,
-            entity_names,
+            canonical_names,   # resolved, canonical names
             progress_label=f"chunk {chunk_num}/{total_chunks} · relationships",
         )
-        bench.record_llm_call(run_id, "relationship_extraction", time.monotonic() - t0, chunk_number=chunk_num)
+        elapsed_llm = time.monotonic() - t0
+        bench.record_llm_call(run_id, "relationship_extraction", elapsed_llm, chunk_number=chunk_num)
+
         for t in triples:
-            key = (t.get('subject', ''), t.get('predicate', ''), t.get('object', ''))
+            # Correct subject/object to canonical form where possible
+            subj = t.get('subject', '')
+            obj = t.get('object', '')
+            canonical_subj = canonical_lookup.get(subj.lower(), subj)
+            canonical_obj = canonical_lookup.get(obj.lower(), obj)
+            t = {**t, 'subject': canonical_subj, 'object': canonical_obj}
+
+            key = (t['subject'], t.get('predicate', ''), t['object'])
             if key not in all_triples_set:
                 all_triples_set.add(key)
                 all_triples.append(t)
+
         elapsed = time.monotonic() - chunk_start
         chunk_times.append(elapsed)
         print(f"  ✓ Relationships: {len(triples)}  ({elapsed:.1f}s)")
         bench.record_chunk(
             run_id, chunk_num,
             word_count=len(chunk.split()),
-            entities=len(entities),
+            entities=chunk_entity_counts[i],
             relationships=len(triples),
             elapsed_s=elapsed,
         )
 
-    # Deduplicate entities — prefer a non-'Other' type if seen in any chunk.
-    unique_entities: dict = {}
-    for entity in all_entities:
-        name = entity.get('entity', '')
-        if not name:
-            continue
-        existing = unique_entities.get(name)
-        if existing is None or existing.get('type', 'Other') == 'Other':
-            unique_entities[name] = entity
-
-    entities_raw = len(unique_entities)
-    print(f"\nTotal unique entities: {entities_raw}")
-    print(f"Total unique triples:  {len(all_triples)}")
-
-    # Entity resolution pass (if enabled in config)
-    if app_config.entity_resolution.enabled:
-        print(f"\nRunning entity resolution ({', '.join(app_config.entity_resolution.strategies)})...")
-        t0 = time.monotonic()
-        resolver = EntityResolver(app_config.entity_resolution, llm_client=None)
-        resolved_list = resolver.resolve(list(unique_entities.values()))
-        unique_entities = {e['entity']: e for e in resolved_list}
-        bench.record_resolution(
-            run_id, "+".join(app_config.entity_resolution.strategies),
-            entities_before=entities_raw,
-            entities_after=len(unique_entities),
-            elapsed_s=time.monotonic() - t0,
-        )
-        print(f"  After resolution: {len(unique_entities)} entities")
+    print(f"\nTotal unique triples: {len(all_triples)}")
 
     # Step 1: Generate TTL knowledge graph.
     print(f"\n1. Generating knowledge graph (TTL)...")

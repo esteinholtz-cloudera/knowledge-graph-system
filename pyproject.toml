@@ -30,8 +30,8 @@ packages = ["src"]
 [tool.pytest.ini_options]
 addopts = "-v -s"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8.0",
 ]
 
