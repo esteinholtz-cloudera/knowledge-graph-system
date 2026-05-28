@@ -8,7 +8,7 @@ from typing import Optional
 from src.config.settings import load_config
 from src.document.processor import DocumentProcessor
 from src.document.html_markup import HTMLMarkupGenerator
-from src.extraction.entity_extractor import EntityExtractor
+from src.extraction.entity_extractor import EntityExtractor, ExtractionError
 from src.extraction.entity_resolver import EntityResolver
 from src.extraction.relationship_extractor import RelationshipExtractor
 from src.storage.benchmark_store import create_benchmark_store, BenchmarkStore
@@ -192,10 +192,22 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         print(f"{'─' * 50}")
         t0 = time.monotonic()
 
-        entities = entity_extractor.extract(
-            chunk,
-            progress_label=f"chunk {chunk_num}/{total_chunks} · entities",
-        )
+        try:
+            entities = entity_extractor.extract(
+                chunk,
+                progress_label=f"chunk {chunk_num}/{total_chunks} · entities",
+            )
+        except ExtractionError as exc:
+            bench.close()
+            print(f"\n{'═' * 50}")
+            print(f"  EXTRACTION ERROR — chunk {chunk_num}/{total_chunks}")
+            print(f"{'═' * 50}")
+            print(str(exc))
+            print("\nHints:")
+            print("  • Set disable_thinking: true in config.yaml for thinking models")
+            print("  • Try a different model or adjust the entity extraction prompt")
+            print("  • Use --max-chunks 1 to isolate which chunk fails")
+            sys.exit(1)
         elapsed = time.monotonic() - t0
         bench.record_llm_call(run_id, "entity_extraction", elapsed, chunk_number=chunk_num)
         all_entities.extend(entities)

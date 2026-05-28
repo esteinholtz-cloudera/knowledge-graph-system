@@ -35,9 +35,18 @@ def _find_balanced(text: str, open_char: str, close_char: str, start: int) -> Op
 
 
 def _strip_fences(text: str) -> str:
-    """Remove markdown code fences (```json ... ``` or ``` ... ```)."""
+    """Remove markdown code fences and XML wrappers around JSON content."""
+    # Strip markdown fences (```json ... ``` or ``` ... ```)
     text = re.sub(r'```(?:json)?\s*', '', text)
     text = re.sub(r'```', '', text)
+    # Strip outermost XML/HTML-style tags that some models wrap around JSON,
+    # e.g. <entities>[...]</entities> or <response>{...}</response>
+    # Repeat in case of nested wrappers.
+    for _ in range(5):
+        stripped = re.sub(r'^\s*<[^>]+>\s*([\s\S]*?)\s*</[^>]+>\s*$', r'\1', text.strip())
+        if stripped == text.strip():
+            break
+        text = stripped
     return text
 
 
