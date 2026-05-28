@@ -20,11 +20,24 @@ llm:
   # Prepend /no_think to disable extended reasoning on thinking models (qwen3, etc.)
   # Prevents token exhaustion before the JSON answer is emitted.
   disable_thinking: true
-
-# Document Processing
-document:
-  chunk_size: 3000
+  # Default chunk settings — used when no model-specific override exists.
+  # Words per extraction call. Smaller = better coverage (avoids "lost in the middle"),
+  # more LLM calls. Tune per model based on observed extraction quality.
+  chunk_size: 300
   overlap: 100
+  # Chunks per section for Pass 2b cross-section relationship extraction.
+  # 0 or 1 disables the section pass.
+  section_size: 5
+  # Per-model overrides. Key = model name as reported by the provider.
+  # Any field here takes precedence over the defaults above for that model.
+  model_settings:
+    qwen3-30b-a3b-instruct-2507-mlx:
+      chunk_size: 300
+      section_size: 5
+      disable_thinking: true
+    gemma-4-26b-a4b-it-mlx:
+      chunk_size: 400
+      section_size: 4
 
 # Storage Configuration
 storage:
@@ -46,6 +59,15 @@ extraction:
     enabled: true
   relationship_extraction:
     enabled: true
+
+# Ontology settings
+ontology:
+  # How to reach the Wikidata MCP server for ontology review
+  # subprocess = launch via uvx (no setup needed)
+  # http       = connect to a running HTTP server (future)
+  # disabled   = skip Wikidata lookups
+  wikidata_mcp: subprocess
+  wikidata_mcp_url: null
 
 # Graph Visualisation
 visualization:

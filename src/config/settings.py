@@ -9,6 +9,32 @@ from pydantic import BaseModel, Field
 
 LLMProvider = Literal["ollama", "lmstudio", "openai", "anthropic", "gemini"]
 
+
+class ModelOverrides(BaseModel):
+    """Per-model overrides applied on top of the global LLM defaults.
+    Only fields explicitly set in config are applied; None means "use default".
+    Add new LLM-specific tuning knobs here as they are identified.
+
+    TODO: LLM calibration
+    The optimal values of chunk_size, overlap, section_size, and prompts vary
+    per model (context window quality, instruction-following, tendency toward
+    "lost in the middle"). Future work:
+    - Automated calibration sweep: vary chunk_size / overlap / section_size across
+      runs on a labelled document and use benchmark DB yield (entities/triples per
+      token) to find the Pareto-optimal config per model.
+    - Prompt calibration: A/B test entity and relationship extraction prompts
+      (few-shot examples, CoT, output format variants) against a gold standard.
+    - Coverage metric: fraction of source text covered by at least one entity
+      mention — makes lost-in-the-middle degradation quantitative and comparable.
+    See docs/Benchmark.md § Roadmap for tracking.
+    """
+    chunk_size: Optional[int] = None
+    overlap: Optional[int] = None
+    section_size: Optional[int] = None
+    disable_thinking: Optional[bool] = None
+    temperature: Optional[float] = None
+    max_new_tokens: Optional[int] = None
+
 DEFAULT_BASE_URLS = {
     "ollama": "http://localhost:11434/v1",
     "lmstudio": "http://localhost:1234/v1",
@@ -32,9 +58,27 @@ class LLMSettings(BaseModel):
     timeout_seconds: int = 120
     temperature: float = 0.3
     max_new_tokens: int = 512
-    # Set to true to prepend /no_think to system prompts.
-    # Recommended for qwen3 and other thinking models to avoid token exhaustion.
     disable_thinking: bool = False
+    # Default chunk settings — words per extraction call.
+    # Override per model in model_settings below.
+    chunk_size: int = 300
+    overlap: int = 100
+    # Number of consecutive chunks to group into one section for Pass 2b
+    # cross-section relationship extraction. 0 or 1 disables the section pass.
+    section_size: int = 5
+    # Per-model overrides keyed by the model name as reported by the provider.
+    # Any field set here takes precedence over the defaults above for that model.
+    model_settings: Dict[str, ModelOverrides] = Field(default_factory=dict)
+
+    def for_model(self, model_name: str) -> "LLMSettings":
+        """Return a copy of this config with model-specific overrides applied."""
+        overrides = self.model_settings.get(model_name, ModelOverrides())
+        data = self.model_dump(exclude={"model_settings"})
+        for field in ModelOverrides.model_fields:
+            value = getattr(overrides, field)
+            if value is not None:
+                data[field] = value
+        return LLMSettings(**data)
 
     def resolved_base_url(self) -> Optional[str]:
         if self.base_url:
@@ -51,11 +95,6 @@ class LLMSettings(BaseModel):
         if not env_name:
             return None
         return os.environ.get(env_name)
-
-
-class DocumentSettings(BaseModel):
-    chunk_size: int = 1000
-    overlap: int = 100
 
 
 class StorageSettings(BaseModel):
@@ -94,6 +133,15 @@ class ExtractionSettings(BaseModel):
     relationship_extraction: dict = Field(default_factory=lambda: {"enabled": True})
 
 
+class OntologySettings(BaseModel):
+    # How to reach the Wikidata MCP server:
+    #   subprocess — launch via uvx each time (no setup needed)
+    #   http       — connect to a running HTTP server (future)
+    #   disabled   — skip Wikidata lookups
+    wikidata_mcp: Literal["subprocess", "http", "disabled"] = "subprocess"
+    wikidata_mcp_url: Optional[str] = None  # used only when mode=http
+
+
 class VisualizationSettings(BaseModel):
     # Path to the ai-knowledge-graph project (for ttl_to_html.py graph generation).
     # null = auto-detect sibling directory ~/src/ai-knowledge-graph.
@@ -116,11 +164,11 @@ class VisualizationSettings(BaseModel):
 
 class AppSettings(BaseModel):
     llm: LLMSettings = Field(default_factory=LLMSettings)
-    document: DocumentSettings = Field(default_factory=DocumentSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     n8n: N8nSettings = Field(default_factory=N8nSettings)
     extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
     entity_resolution: EntityResolutionSettings = Field(default_factory=EntityResolutionSettings)
+    ontology: OntologySettings = Field(default_factory=OntologySettings)
     visualization: VisualizationSettings = Field(default_factory=VisualizationSettings)
 
 

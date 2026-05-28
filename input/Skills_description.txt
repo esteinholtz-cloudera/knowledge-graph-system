@@ -1,0 +1,56 @@
+In agentic AI, skills act as the system’s procedural memory.
+If a Large Language Model (LLM) is the "brain," and Retrieval-Augmented Generation (RAG) is its "semantic memory" (knowing facts), then skills are the explicit manual for how to get things done. They bridge the gap between an AI simply guessing how to perform a task and a developer having to hardcode every single step.
+Here is how skills are structured, managed, and executed in modern agentic AI systems.
+1. The Anatomy of an Agent Skill
+Under industry standards (like the agentskills.io open standard used by platforms like Claude Code, OpenAI Codex, and Microsoft Agent Framework), a skill is a modular, portable directory. It is typically defined by a SKILL.md file that includes:
+	•	Metadata (YAML Frontmatter): The name of the skill and a sharp, concise description of what it does. 
+	•	The Body (Instructions): Step-by-step rules, business logic, constraints, and examples written in natural language that dictate exactly how the agent should execute the task. 
+	•	Assets and Resources: Associated scripts (Python, JavaScript, Bash), templates, or reference documents that the skill needs to function. 
+2. How the Agent Uses Skills: Progressive Disclosure
+An enterprise AI agent might have access to hundreds of individual skills (e.g., Deploy AWS Instance, Triage Support Ticket, Generate Monthly Expense Report). Shoving all those instructions into the LLM's context window at once would cause "context explosion" and waste tokens.
+To solve this, agentic systems use a three-tier execution loop called progressive disclosure:
+[User Request] 
+      │
+      ▼
+┌────────────────────────────────────────────────────────┐
+│ Tier 1: Metadata Matching                              │
+│ Agent reviews only the names & descriptions of skills. │
+└─────────────────────────┬──────────────────────────────┘
+                          │ (Matches "File Expense")
+                          ▼
+┌────────────────────────────────────────────────────────┐
+│ Tier 2: Instruction Loading                            │
+│ Full step-by-step procedural rules injected into context│
+└─────────────────────────┬──────────────────────────────┘
+                          │ (Executes workflow)
+                          ▼
+┌────────────────────────────────────────────────────────┐
+│ Tier 3: Resource Activation                            │
+│ Agent pulls specific python scripts or API templates.  │
+└────────────────────────────────────────────────────────┘
+3. The Core Difference: Skills vs. Tools vs. RAG
+It’s easy to confuse skills with other agentic components, but they serve distinct purposes:
+Feature
+What it is
+Example
+Analogy
+Tools
+The hardware or capability to interact with the outside world.
+An API client, a web scraper, a database connector.
+Having a wrench.
+RAG
+The knowledge base or static data context.
+Company HR policy docs, product catalogs.
+Reading the instruction manual.
+Skills
+The process, sequencing, and judgment required to use tools.
+"To handle a refund: Check the database (Tool), cross-reference policy (RAG), and if under $50, auto-approve."
+Knowing how to fix the plumbing.
+4. Why Skills are Crucial for Agentic Workflows
+Deterministic Execution of Non-Deterministic Models
+LLMs are inherently probabilistic—they like to improvise. By injecting a specialized skill into the context window, you bound the agent's reasoning. It ensures the AI follows a rigid, audited company workflow (like an engineering deployment or financial audit) without needing a human to guide it step-by-step.
+Inter-Agent Orchestration
+In Multi-Agent Systems (MAS), a "Supervisor" or "Orchestrator" agent can look at a complex goal, break it down, and delegate tasks to sub-agents based on their specific skill registries.
+Portability and Version Control
+Because skills are fundamentally just structured text files and scripts, they can be tracked in Git, peer-reviewed by developers, and easily shared across completely different agent frameworks (e.g., moving a skill from an internal desktop automation script into an enterprise cloud framework).
+Would you like to see a concrete code example of how a standard SKILL.md file is structured for an agent?

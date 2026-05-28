@@ -18,6 +18,11 @@ ont:Location a owl:Class ;
     rdfs:label "Location" ;
     rdfs:comment "A geographical place or location" .
 
+ont:Mcp_Server a owl:Class ;
+    rdfs:label "Mcp Server" ;
+    rdfs:comment "Proposed from: MCP.txt (triple: Git MCP Server isA MCP Server); MCP.txt (triple: Filesystem MCP Server isA MCP Server)" ;
+    rdfs:subClassOf ont:Technology .
+
 ont:Organization a owl:Class ;
     rdfs:label "Organization" ;
     rdfs:comment "A company, institution, or group" .
@@ -33,6 +38,31 @@ ont:Person a owl:Class ;
 ont:Product a owl:Class ;
     rdfs:label "Product" ;
     rdfs:comment "A product or service" .
+
+ont:Railway a owl:Class ;
+    rdfs:label "Railway" ;
+    rdfs:comment "Proposed from: industrial_revolution.txt (triple: Liverpool-Manchester Railway is_a railway); industrial_revolution.txt (triple: Transcontinental Railroad is_a railway)" ;
+    rdfs:subClassOf ont:rail_network ;
+    owl:equivalentClass <http://www.wikidata.org/entity/Q728937> .
+
+ont:rail_network a owl:Class ;
+    rdfs:label "rail network" ;
+    rdfs:comment "Added via Wikidata P279 lookup (wd:Q57498564)" ;
+    rdfs:subClassOf ont:transport_network ;
+    owl:equivalentClass <http://www.wikidata.org/entity/Q2678338>,
+        <http://www.wikidata.org/entity/Q57498564> .
+
+ont:transport_infrastructure a owl:Class ;
+    rdfs:label "transport infrastructure" ;
+    rdfs:comment "Added via Wikidata P279 lookup (wd:Q376799)" ;
+    rdfs:subClassOf ont:Technology ;
+    owl:equivalentClass <http://www.wikidata.org/entity/Q376799> .
+
+ont:transport_network a owl:Class ;
+    rdfs:label "transport network" ;
+    rdfs:comment "Added via Wikidata P279 lookup (wd:Q924286)" ;
+    rdfs:subClassOf ont:transport_infrastructure ;
+    owl:equivalentClass <http://www.wikidata.org/entity/Q924286> .
 
 ont:Technology a owl:Class ;
     rdfs:label "Technology" ;

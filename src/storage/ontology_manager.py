@@ -44,6 +44,7 @@ class OntologyManager:
         self.proposed_file = self.ontology_dir / "ontology_proposed.ttl"
         self.graph = Graph()
         self._proposals: Dict[str, Dict] = {}  # class_name -> {uri, label, sources}
+        self._entity_retyping_proposals: list = []  # entities needing better type
         self._load_ontology()
         self._load_existing_proposals()
 
@@ -147,6 +148,27 @@ class OntologyManager:
             self.graph.add((uri, RDFS.label, Literal(canonical)))
             self._save_ontology()
 
+    def propose_entity_retyping(
+        self,
+        entity_uri: str,
+        entity_label: str,
+        source_ttl: str,
+        source_description: Optional[str] = None,
+    ):
+        """
+        Flag an entity currently typed as ont:Other as needing a better type.
+        Added to ontology_proposed.ttl for review via 'ontology review'.
+        """
+        self._entity_retyping_proposals.append({
+            "entity_uri": entity_uri,
+            "entity_label": entity_label,
+            "source_ttl": source_ttl,
+            "proposed_by": source_description or "",
+        })
+
+    def has_entity_retyping_proposals(self) -> bool:
+        return bool(self._entity_retyping_proposals)
+
     # ------------------------------------------------------------------
     # Proposal collection
     # ------------------------------------------------------------------
@@ -183,48 +205,41 @@ class OntologyManager:
 
     def write_proposed_ontology(self, generated_by: Optional[str] = None):
         """
-        Write ontology_proposed.ttl = full approved ontology + candidate additions.
+        Write ontology_proposed.ttl in DIFFERENTIAL format.
 
-        The file is a complete, valid Turtle file so reviewers have full context.
+        Contains ONLY new additions with review_status metadata.
+        Delegates to ProposalStore which handles accumulation across runs.
         """
         if not self._proposals:
             return  # Nothing to write; don't delete any pre-existing proposals
 
-        # Start from a copy of the current approved graph.
-        proposed_graph = Graph()
-        for prefix, ns in self.graph.namespaces():
-            proposed_graph.bind(prefix, ns)
-        for triple in self.graph:
-            proposed_graph.add(triple)
-
-        # Add candidate classes.
-        for class_info in self._proposals.values():
-            uri = class_info['uri']
-            label = class_info['label']
-            proposed_graph.add((uri, RDF.type, OWL.Class))
-            proposed_graph.add((uri, RDFS.label, Literal(label)))
-            sources = class_info['sources']
-            if sources:
-                comment = "Proposed from: " + "; ".join(sources)
-                proposed_graph.add((uri, RDFS.comment, Literal(comment)))
-
-        # Serialize, then append a human-readable header comment.
-        ttl_text = proposed_graph.serialize(format='turtle')
-        ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        by = f" by {generated_by}" if generated_by else ""
-        header = (
-            f"# ontology_proposed.ttl — generated {ts}{by}\n"
-            f"#\n"
-            f"# This file contains the FULL current ontology PLUS the proposed additions\n"
-            f"# listed at the bottom. It is safe to use as the new ontology.ttl.\n"
-            f"#\n"
-            f"# To approve all proposed additions, run:\n"
-            f"#   python main.py ontology approve\n"
-            f"#\n"
-            f"# To approve selectively, edit this file first (remove unwanted classes),\n"
-            f"# then run the approve command.\n\n"
+        from src.ontology.proposal_store import ProposalStore
+        store = ProposalStore(
+            str(self.proposed_file),
+            str(self.ontology_file),
         )
-        self.proposed_file.write_text(header + ttl_text, encoding='utf-8')
+        for label, class_info in self._proposals.items():
+            sources = class_info.get('sources', [])
+            comment = ("Proposed from: " + "; ".join(sources)) if sources else ""
+            existing = {c['label'] for c in store.get_all()}
+            if label not in existing:
+                store.add_class(
+                    label=label,
+                    comment=comment,
+                    proposed_by=generated_by or "",
+                )
+
+        # Add entity re-typing proposals
+        for entry in self._entity_retyping_proposals:
+            existing_nodes = {r['entity_uri'] for r in store.get_needs_typing()}
+            if entry['entity_uri'] not in existing_nodes:
+                store.add_entity_retyping(
+                    entity_uri=entry['entity_uri'],
+                    entity_label=entry['entity_label'],
+                    source_ttl=entry['source_ttl'],
+                    proposed_by=entry['proposed_by'],
+                )
+        store.save()
 
     # ------------------------------------------------------------------
     # Approval
@@ -232,20 +247,25 @@ class OntologyManager:
 
     def approve_proposed_ontology(self) -> int:
         """
-        Replace ontology.ttl with ontology_proposed.ttl.
+        Approve all pending proposals — merges them into ontology.ttl.
 
-        Returns the number of new classes that were approved.
+        Uses ProposalStore to merge only approved items (not replace the whole file).
+        Returns the number of new classes merged.
         """
         if not self.proposed_file.exists():
             return 0
-        # Parse the proposal file and re-serialize cleanly (strips header comments).
-        approved = Graph()
-        approved.parse(str(self.proposed_file), format='turtle')
-        approved.serialize(destination=str(self.ontology_file), format='turtle')
-        self.proposed_file.unlink()
-        # Reload the approved graph.
-        self.graph = approved
-        return len(self._proposals)
+        from src.ontology.proposal_store import ProposalStore
+        store = ProposalStore(str(self.proposed_file), str(self.ontology_file))
+        # Mark all pending as approved (bulk approve)
+        for cls in store.get_pending():
+            store.set_status(cls['uri'], 'approved')
+        store.save()
+        merged = store.merge_approved_into_ontology()
+        # Reload the approved graph
+        self.graph = Graph()
+        if self.ontology_file.exists():
+            self.graph.parse(str(self.ontology_file), format='turtle')
+        return merged
 
     # ------------------------------------------------------------------
     # Legacy helpers

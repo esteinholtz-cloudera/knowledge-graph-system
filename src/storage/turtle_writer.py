@@ -131,6 +131,10 @@ class TurtleWriter:
 
         # Ensure every extracted entity has a sourceDocument link, rdf:type,
         # and alternate names — even if never in a relationship triple.
+        # Option A: entities typed as 'Other' are flagged for re-typing review.
+        kg_filepath = self.output_dir / f"{document_id}.ttl"
+        doc_name = document_metadata.get('filename', document_id) if document_metadata else document_id
+
         for name, canonical_type in entity_types.items():
             uri = create_entity_uri(name)
             graph.add((uri, DOC.sourceDocument, doc_uri))
@@ -140,6 +144,14 @@ class TurtleWriter:
             # Write alternate name variants as kg:alternateName literals
             for alt in entity_alternate_names.get(name, []):
                 graph.add((uri, KG.alternateName, Literal(alt)))
+            # Flag 'Other' typed entities for re-typing (Option A)
+            if canonical_type == "Other":
+                self.ontology_manager.propose_entity_retyping(
+                    entity_uri=str(uri),
+                    entity_label=name,
+                    source_ttl=str(kg_filepath),
+                    source_description=doc_name,
+                )
 
         # Persist KG file.
         filepath = self.output_dir / f"{document_id}.ttl"

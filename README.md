@@ -210,6 +210,10 @@ With the server running:
 - `POST /extract/entities`, `POST /extract/relationships`, `POST /store`
 - `GET /metadata`, `GET /metadata/<document_id>`
 
+## Ontology management
+
+The system maintains a local OWL ontology that types all extracted entities. New classes are proposed during extraction and reviewed interactively with LLM placement suggestions and Wikidata alignment. See [docs/ONTOLOGY.md](docs/ONTOLOGY.md) for the full workflow, CLI reference, and configuration.
+
 ## Benchmarking
 
 Pipeline metrics (entity counts, LLM timings, resolution results) are recorded to a local DuckDB database. See [docs/Benchmark.md](docs/Benchmark.md) for the schema, CLI, and example queries.
