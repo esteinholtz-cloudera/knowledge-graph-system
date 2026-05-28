@@ -55,6 +55,10 @@ class EntityExtractor:
             return [e for e in data if isinstance(e, dict) and e.get("entity")]
         if isinstance(data, dict) and "entities" in data:
             return [e for e in data["entities"] if isinstance(e, dict) and e.get("entity")]
+        # Single entity returned as a bare dict instead of a one-element array.
+        if isinstance(data, dict) and data.get("entity"):
+            logger.warning("Entity extraction: model returned a single entity object instead of an array; treating as one-element list.")
+            return [data]
 
         # Valid JSON but not a shape we can use — abort.
         raise ExtractionError(
