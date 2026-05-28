@@ -44,6 +44,7 @@ class OntologyManager:
         self.proposed_file = self.ontology_dir / "ontology_proposed.ttl"
         self.graph = Graph()
         self._proposals: Dict[str, Dict] = {}  # class_name -> {uri, label, sources}
+        self._entity_retyping_proposals: list = []  # entities needing better type
         self._load_ontology()
         self._load_existing_proposals()
 
@@ -147,6 +148,27 @@ class OntologyManager:
             self.graph.add((uri, RDFS.label, Literal(canonical)))
             self._save_ontology()
 
+    def propose_entity_retyping(
+        self,
+        entity_uri: str,
+        entity_label: str,
+        source_ttl: str,
+        source_description: Optional[str] = None,
+    ):
+        """
+        Flag an entity currently typed as ont:Other as needing a better type.
+        Added to ontology_proposed.ttl for review via 'ontology review'.
+        """
+        self._entity_retyping_proposals.append({
+            "entity_uri": entity_uri,
+            "entity_label": entity_label,
+            "source_ttl": source_ttl,
+            "proposed_by": source_description or "",
+        })
+
+    def has_entity_retyping_proposals(self) -> bool:
+        return bool(self._entity_retyping_proposals)
+
     # ------------------------------------------------------------------
     # Proposal collection
     # ------------------------------------------------------------------
@@ -199,13 +221,23 @@ class OntologyManager:
         for label, class_info in self._proposals.items():
             sources = class_info.get('sources', [])
             comment = ("Proposed from: " + "; ".join(sources)) if sources else ""
-            # Only add if not already in the store
             existing = {c['label'] for c in store.get_all()}
             if label not in existing:
                 store.add_class(
                     label=label,
                     comment=comment,
                     proposed_by=generated_by or "",
+                )
+
+        # Add entity re-typing proposals
+        for entry in self._entity_retyping_proposals:
+            existing_nodes = {r['entity_uri'] for r in store.get_needs_typing()}
+            if entry['entity_uri'] not in existing_nodes:
+                store.add_entity_retyping(
+                    entity_uri=entry['entity_uri'],
+                    entity_label=entry['entity_label'],
+                    source_ttl=entry['source_ttl'],
+                    proposed_by=entry['proposed_by'],
                 )
         store.save()
 

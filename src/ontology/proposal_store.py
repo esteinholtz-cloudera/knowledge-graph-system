@@ -22,10 +22,13 @@ WD = Namespace("http://www.wikidata.org/entity/")
 
 REVIEW_STATUS = ONT_META.reviewStatus
 PROPOSED_BY = ONT_META.proposedBy
+SOURCE_TTL = ONT_META.sourceTTL        # for entity re-typing proposals
+ENTITY_LABEL = ONT_META.entityLabel    # human-readable label of the entity needing typing
 
 STATUS_PENDING = Literal("pending")
 STATUS_APPROVED = Literal("approved")
 STATUS_REJECTED = Literal("rejected")
+STATUS_NEEDS_TYPING = Literal("needs_typing")
 
 _HEADER = """\
 # ontology_proposed.ttl — DIFFERENTIAL additions only
@@ -198,8 +201,85 @@ class ProposalStore:
     def status_summary(self) -> Dict[str, int]:
         """Return counts by status."""
         all_classes = self.get_all()
-        counts: Dict[str, int] = {"pending": 0, "approved": 0, "rejected": 0}
+        counts: Dict[str, int] = {"pending": 0, "approved": 0, "rejected": 0, "needs_typing": 0}
         for cls in all_classes:
             s = cls.get("status", "pending")
             counts[s] = counts.get(s, 0) + 1
+        # Also count entity re-typing proposals
+        counts["needs_typing"] += len(self.get_needs_typing())
         return counts
+
+    # ------------------------------------------------------------------
+    # Entity re-typing proposals (for entities typed as ont:Other)
+    # ------------------------------------------------------------------
+
+    def add_entity_retyping(
+        self,
+        entity_uri: str,
+        entity_label: str,
+        source_ttl: str,
+        proposed_by: str = "",
+    ):
+        """
+        Flag an entity as needing a more specific type (currently typed as ont:Other).
+        Uses a blank node keyed by entity URI to avoid duplicates.
+        """
+        from rdflib import BNode
+        from urllib.parse import quote
+        # Use a stable local name derived from the entity URI
+        local = quote(entity_uri.split("/")[-1], safe="")
+        node = URIRef(f"http://example.org/ontology/meta/retype/{local}")
+        g = self._graph
+        if (node, REVIEW_STATUS, STATUS_NEEDS_TYPING) in g:
+            return  # Already registered
+        g.add((node, REVIEW_STATUS, STATUS_NEEDS_TYPING))
+        g.add((node, ONT_META.entityURI, URIRef(entity_uri)))
+        g.add((node, ENTITY_LABEL, Literal(entity_label)))
+        g.add((node, SOURCE_TTL, Literal(source_ttl)))
+        if proposed_by:
+            g.add((node, PROPOSED_BY, Literal(proposed_by)))
+
+    def get_needs_typing(self) -> List[Dict]:
+        """Return entities flagged as needing a better type."""
+        results = []
+        for node, _, _ in self._graph.triples((None, REVIEW_STATUS, STATUS_NEEDS_TYPING)):
+            entity_uri = str(next(self._graph.objects(node, ONT_META.entityURI), ""))
+            label = str(next(self._graph.objects(node, ENTITY_LABEL), ""))
+            source_ttl = str(next(self._graph.objects(node, SOURCE_TTL), ""))
+            proposed_by = str(next(self._graph.objects(node, PROPOSED_BY), ""))
+            results.append({
+                "node": str(node),
+                "entity_uri": entity_uri,
+                "label": label,
+                "source_ttl": source_ttl,
+                "proposed_by": proposed_by,
+            })
+        return results
+
+    def resolve_entity_retyping(self, node_uri: str, new_class_uri: str, ttl_file: str) -> bool:
+        """
+        Patch the KG TTL file: replace ont:Other with new_class_uri for the entity.
+        Marks the proposal as approved.
+        """
+        from rdflib import Graph as RDFGraph
+        from rdflib.namespace import RDF as _RDF
+        from src.storage.rdf_utils import ONT as ONT_NS
+        entity_uri = str(next(
+            self._graph.objects(URIRef(node_uri), ONT_META.entityURI), ""
+        ))
+        if not entity_uri or not ttl_file:
+            return False
+        path = Path(ttl_file)
+        if not path.exists():
+            return False
+        g = RDFGraph()
+        g.parse(str(path), format="turtle")
+        other_uri = URIRef(str(ONT_NS) + "Other")
+        entity = URIRef(entity_uri)
+        if (entity, _RDF.type, other_uri) in g:
+            g.remove((entity, _RDF.type, other_uri))
+            g.add((entity, _RDF.type, URIRef(new_class_uri)))
+            g.serialize(destination=str(path), format="turtle")
+        # Mark as approved
+        self._graph.set((URIRef(node_uri), REVIEW_STATUS, STATUS_APPROVED))
+        return True

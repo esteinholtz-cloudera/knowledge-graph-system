@@ -204,13 +204,136 @@ def run_interactive_review(
             else:
                 print(f"  Invalid choice '{choice}'. Please try again.")
 
+    # ── Entity re-typing section ───────────────────────────────────────
+    needs_typing = store.get_needs_typing()
+    if needs_typing:
+        print(f"\n{_DIVIDER}")
+        print(f"  Entity re-typing ({len(needs_typing)} entities currently typed as ont:Other)")
+        print(_DIVIDER)
+        reviewed += _review_entity_retyping(needs_typing, store, ontology, proposer, wikidata_mode)
+
     print(f"\n{_DIVIDER}")
-    print(f"  Review complete: {reviewed}/{total} classes processed.")
+    print(f"  Review complete: {reviewed} item(s) processed.")
     if reviewed > 0:
         merged = store.merge_approved_into_ontology()
         if merged:
             print(f"  Merged {merged} approved class(es) into ontology.ttl")
+    store.save()
     print(_DIVIDER)
+    return reviewed
+
+
+def _review_entity_retyping(
+    needs_typing: list,
+    store,
+    ontology,
+    proposer,
+    wikidata_mode: str,
+) -> int:
+    """Review entities currently typed as ont:Other and assign a proper class."""
+    from rdflib import Graph
+    from .proposal_store import ONT_BASE
+
+    # Build list of available ontology classes for user display
+    ont_classes = sorted(
+        str(s).replace(ONT_BASE, "ont:")
+        for s in ontology.subjects(None, None)
+        if str(s).startswith(ONT_BASE)
+    )
+
+    reviewed = 0
+    total = len(needs_typing)
+
+    for idx, entry in enumerate(needs_typing, 1):
+        label = entry["label"]
+        entity_uri = entry["entity_uri"]
+        source_ttl = entry["source_ttl"]
+        node_uri = entry["node"]
+
+        print(f"\n  {idx}/{total}  {label}")
+        print(f"  URI: {entity_uri}")
+        print(f"  KG file: {source_ttl}")
+        print(f"\n  Available classes: {', '.join(ont_classes[:12])}")
+        if len(ont_classes) > 12:
+            print(f"  ... and {len(ont_classes) - 12} more")
+
+        # Generate LLM proposals for this entity
+        proposals: list = []
+        if proposer:
+            proposals = proposer.propose(label, ontology, context=f"entity in knowledge graph: {label}")
+
+        wikidata_hits: list = []
+
+        while True:
+            if proposals:
+                print()
+                _print_proposals(proposals, wikidata_hits if wikidata_hits else None)
+            letters = "".join(chr(ord("a") + i) for i in range(len(proposals)))
+            print(f"\n  d) Try again   s) Search Wikidata   m) Specify class   r) Skip")
+            choice = input(f"  Choice [{letters}/d/s/m/r]: ").strip().lower()
+
+            if choice == "r":
+                print("  → Skipped.")
+                reviewed += 1
+                break
+
+            elif choice == "d" and proposer:
+                proposals = proposer.propose(label, ontology, context=label)
+                continue
+
+            elif choice == "s":
+                term = input("  Search term (Enter to use entity label): ").strip() or label
+                hits = _wikidata_search(term, wikidata_mode)
+                if not hits:
+                    print("  No results found.")
+                    continue
+                wikidata_hits = hits
+                for i, hit in enumerate(hits[:5], 1):
+                    desc = hit.get("description", "")[:70]
+                    print(f"  {i}. {hit['qid']}  \"{hit['label']}\" — {desc}")
+                pick = input("\n  Pick result (0 to cancel): ").strip()
+                if pick.isdigit() and 1 <= int(pick) <= len(hits):
+                    selected = hits[int(pick) - 1]
+                    qid = selected["qid"]
+                    parents = _wikidata_superclasses(qid, wikidata_mode)
+                    mapped = _map_wikidata_parents(parents, ontology)
+                    if mapped:
+                        store.resolve_entity_retyping(node_uri, mapped, source_ttl)
+                        store.set_equivalent_class(node_uri, f"http://www.wikidata.org/entity/{qid}")
+                        store.save()
+                        print(f"  → Retyped to {_label_uri(mapped)}")
+                        reviewed += 1
+                        break
+                    else:
+                        print("  (Could not map to ontology class — use 'm' to specify manually)")
+                continue
+
+            elif choice == "m":
+                raw = input("  Class (e.g. ont:Technology or full URI): ").strip()
+                if raw.startswith("ont:"):
+                    class_uri = ONT_BASE + raw[4:]
+                elif raw.startswith("http"):
+                    class_uri = raw
+                else:
+                    class_uri = ONT_BASE + raw.replace(" ", "_")
+                store.resolve_entity_retyping(node_uri, class_uri, source_ttl)
+                store.save()
+                print(f"  → Retyped to {_label_uri(class_uri)}")
+                reviewed += 1
+                break
+
+            elif choice in letters:
+                idx_choice = ord(choice) - ord("a")
+                if idx_choice < len(proposals):
+                    chosen = proposals[idx_choice]
+                    store.resolve_entity_retyping(node_uri, chosen["parent"], source_ttl)
+                    store.save()
+                    print(f"  → Retyped to {_label_uri(chosen['parent'])}")
+                    reviewed += 1
+                    break
+            else:
+                print(f"  Invalid choice. Try again.")
+
     return reviewed
 
 

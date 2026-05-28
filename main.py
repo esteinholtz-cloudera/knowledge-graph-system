@@ -560,15 +560,23 @@ def show_ontology_status(ontology_dir: str = "data/ontology"):
     store = ProposalStore(str(proposal_file), str(ontology_file))
     summary = store.status_summary()
     print(f"\nOntology proposals:")
-    print(f"  Pending:  {summary.get('pending', 0)}")
-    print(f"  Approved: {summary.get('approved', 0)}")
-    print(f"  Rejected: {summary.get('rejected', 0)}")
+    print(f"  New classes pending:    {summary.get('pending', 0)}")
+    print(f"  Entities needing type:  {summary.get('needs_typing', 0)}")
+    print(f"  Approved: {summary.get('approved', 0)}   Rejected: {summary.get('rejected', 0)}")
     pending = store.get_pending()
     if pending:
-        print(f"\nPending classes:")
+        print(f"\nPending new classes:")
         for cls in pending:
             src = cls.get('proposed_by', '')
             print(f"  • {cls['label']}" + (f"  ← {src}" if src else ""))
+    needs_typing = store.get_needs_typing()
+    if needs_typing:
+        print(f"\nEntities typed as ont:Other (need re-typing):")
+        for e in needs_typing[:10]:
+            print(f"  • {e['label']}  ← {e['source_ttl'].split('/')[-1]}")
+        if len(needs_typing) > 10:
+            print(f"  ... and {len(needs_typing) - 10} more")
+    if pending or needs_typing:
         print(f"\nRun: python main.py ontology review")
 
 
