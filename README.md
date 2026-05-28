@@ -56,7 +56,7 @@ From the repo root:
 uv run python main.py process data/documents/my-doc.txt
 ```
 
-The pipeline:
+The pipeline runs in two passes:
 
 ```
 Document
@@ -64,36 +64,39 @@ Document
   ▼
 DocumentProcessor  ── chunk text (chunk_size / overlap)
   │
-  ├─ EntityExtractor      ── LLM → named entities with types
+  ├─ Pass 1: Entity extraction (all chunks)
+  │    └─ EntityExtractor       ── LLM → named entities with types
+  │         ↓ case-insensitive dedup (HAMLET/HAmlet/hamlet → Hamlet)
+  │         ↓ EntityResolver    ── rule_based / embedding / llm strategies
+  │              → alternate_names recorded for each variant
   │
-  ├─ RelationshipExtractor── LLM → subject–predicate–object triples
+  ├─ Pass 2: Relationship extraction (canonical entity names as hints)
+  │    └─ RelationshipExtractor ── LLM → subject–predicate–object triples
+  │         ↓ subjects/objects corrected to canonical names via lookup
   │
-  ├─ EntityResolver       ── optional deduplication pass
-  │    ├─ rule_based      ── ALL_CAPS→Title Case, abbreviation hints
-  │    ├─ embedding       ── cosine similarity (nomic-embed-text)
-  │    └─ llm             ── LLM coreference confirmation
-  │
-  ├─ TurtleWriter         ── RDF Turtle (.ttl)
-  │    ├─ entities → kg: URIs with rdf:type → ont: classes
+  ├─ TurtleWriter         ── RDF Turtle (my-doc.ttl)
+  │    ├─ entities → kg: URIs  (rdf:type → ont: classes)
+  │    ├─ kg:alternateName for resolved variants
   │    ├─ non-entity objects → Literals
-  │    └─ new types → ontology_proposed.ttl (awaiting approval)
+  │    └─ new types → ontology_proposed.ttl (awaiting human approval)
   │
-  └─ HTMLMarkupGenerator  ── reads TTL → annotated HTML markup
+  └─ HTMLMarkupGenerator  ── reads TTL → annotated HTML (my-doc_markup.html)
+       └─ [--with-graph]  ── ttl_to_html.py → interactive graph (my-doc_graph.html)
 ```
 
 Outputs for `my-doc.txt`:
 
-1. **Knowledge graph** `data/knowledge_graphs/<hash>.ttl` — entities, triples, `rdf:type` ontology links
-2. **HTML markup** `data/documents/my-doc_markup.html` — document with entities highlighted, linked to the graph
-3. **Ontology proposals** `data/ontology/ontology_proposed.ttl` — new classes for human review (if any)
+1. **Knowledge graph** `data/knowledge_graphs/my-doc.ttl` — entities, triples, `rdf:type` and `kg:alternateName`
+2. **HTML markup** `data/documents/my-doc_markup.html` — entities highlighted, links to graph view
+3. **Ontology proposals** `data/ontology/ontology_proposed.ttl` — new classes for human review (accumulates across runs)
 
 ### 5. Check the outputs
 
 | What | Where | What to look for |
 |------|--------|------------------|
-| Knowledge graph | `data/knowledge_graphs/<hash>.ttl` | Triples plus `a ont:Person` (etc.) on entities |
+| Knowledge graph | `data/knowledge_graphs/my-doc.ttl` | Triples plus `a ont:Person` (etc.) on entities |
 | HTML markup | `data/documents/my-doc_markup.html` | Open in a browser; entities highlighted with types |
-| Document index | `data/metadata.json` | Maps document hash → paths and timestamps |
+| Document index | `data/metadata.json` | Maps document stem → paths and timestamps |
 | Ontology | `data/ontology/ontology.ttl` | OWL classes (`ont:Person`, `ont:Technology`, …) |
 
 **Verify ontology typing** in the TTL file:
@@ -110,7 +113,7 @@ You should see lines like `kg:Some_Entity a ont:Technology ;`.
 cat data/ontology/ontology.ttl
 ```
 
-New entity types from extraction are added to this file automatically when needed.
+New entity types proposed during extraction accumulate in `ontology_proposed.ttl` and are merged into `ontology.ttl` only after human approval (`python main.py ontology approve`).
 
 ### 6. Optional: run without the full LLM
 
@@ -146,10 +149,14 @@ knowledge-graph-system/
 
 - Text, Markdown, PDF, and Word input
 - Configurable LLM: Ollama, LM Studio, OpenAI, Anthropic, Gemini
+- Two-pass pipeline — entities resolved before relationship extraction for consistent naming
+- Case-insensitive entity dedup with `kg:alternateName` variants stored in TTL
+- Entity resolution: rule-based, embedding similarity (0.92), LLM coreference
 - RDF Turtle knowledge graphs with local ontology (`rdf:type`)
-- Entity resolution pass: rule-based, embedding similarity, LLM coreference
-- HTML document markup generated from the TTL, linked to an interactive graph view
-- Ontology proposal workflow — new classes require human approval before being added
+- Ontology proposal workflow — new classes accumulate across runs; human approval required
+- HTML markup + interactive vis-network graph from TTL
+- Archive command — snapshot `data/` with updated paths; benchmark DB stays in place
+- Optional DuckDB benchmarking (`uv sync --extra benchmark`)
 - n8n HTTP API (`python main.py server`)
 
 ## CLI reference
@@ -158,11 +165,21 @@ knowledge-graph-system/
 # Full pipeline (pre-flight check, TTL, HTML markup)
 uv run python main.py process <path-to-document>
 
+# Also generate interactive graph HTML (requires ai-knowledge-graph)
+uv run python main.py process <path-to-document> --with-graph
+
 # Limit chunks for quick testing on long documents
 uv run python main.py process <path-to-document> --max-chunks 3
 
 # Approve proposed ontology additions after reviewing ontology_proposed.ttl
 uv run python main.py ontology approve
+
+# Archive current data/ to data_save_<name> (benchmark.duckdb stays in place)
+uv run python main.py archive --name my_run_1
+
+# View benchmark metrics (requires: uv sync --extra benchmark)
+uv run python main.py benchmark show
+uv run python main.py benchmark query "SELECT llm_model, avg(elapsed_s) FROM runs GROUP BY llm_model"
 
 # n8n integration server
 uv run python main.py server --port 5000
@@ -178,6 +195,7 @@ Supported inputs: `.txt`, `.md`, `.pdf`, `.docx`.
 - **document** — `chunk_size`, `overlap`
 - **storage** — directories for graphs, documents, ontology
 - **entity_resolution** — `enabled`, `strategies` (rule_based / embedding / llm), `embedding_threshold`, `abbreviation_hints`
+- **visualization** — `ai_kg_path` (path to `ai-knowledge-graph` for `--with-graph`)
 
 API keys belong in the environment only (never in YAML). Copy [`.env.example`](.env.example) as a reminder.
 
