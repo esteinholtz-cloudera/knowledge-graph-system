@@ -4,6 +4,7 @@
 
 - Property definitions (`owl:ObjectProperty`) with `rdfs:domain` / `rdfs:range` — next sprint
 - External ontology import (`owl:imports`)
+- **Axioms and rules** — add OWL axioms (e.g. disjointness, transitivity, inverse properties) and SWRL/SHACL rules as a basis for inference over the knowledge graph
 
 ## Extraction / LLM calibration
 
