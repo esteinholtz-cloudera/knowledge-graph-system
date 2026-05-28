@@ -43,7 +43,14 @@ def run_precheck() -> bool:
         resp = httpx.get(f"{base_url}/models", headers=headers, timeout=8)
         resp.raise_for_status()
         available = [m["id"] for m in resp.json().get("data", [])]
-        if llm.model in available:
+        if llm.model is None:
+            # Auto-detect: use first available
+            if available:
+                print(f"  ✓ LLM model:      {available[0]} (auto-detected)")
+            else:
+                print(f"  ✗ LLM model:      no models available at {base_url}")
+                all_ok = False
+        elif llm.model in available:
             print(f"  ✓ LLM model:      {llm.model}")
         else:
             print(f"  ✗ LLM model:      {llm.model!r} NOT found at {base_url}")
@@ -140,6 +147,13 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
 
     app_config = load_config()
 
+    # Build extractors once so the model is resolved (auto-detect fires here)
+    entity_extractor = EntityExtractor()
+    relationship_extractor = RelationshipExtractor()
+
+    # Resolved model name (important when model: null in config)
+    resolved_model = entity_extractor.llm_client._provider.model
+
     # Open benchmark DB and start run record (no-op if duckdb not installed)
     bench = create_benchmark_store()
     run_id = bench.start_run(
@@ -147,14 +161,11 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         document_id=document_id,
         word_count=doc_data['word_count'],
         llm_provider=app_config.llm.provider,
-        llm_model=app_config.llm.model,
+        llm_model=resolved_model,
         resolution_enabled=app_config.entity_resolution.enabled,
         resolution_strategies=list(app_config.entity_resolution.strategies),
         max_chunks=max_chunks,
     )
-
-    entity_extractor = EntityExtractor()
-    relationship_extractor = RelationshipExtractor()
 
     total_chunks = len(chunks)
     chunk_times: list = []
@@ -437,9 +448,12 @@ def archive_data(name: Optional[str] = None, llmnamed: bool = False):
     from datetime import datetime, timezone
 
     if llmnamed:
+        from src.extraction.providers.factory import create_provider
         cfg = load_config()
-        # Sanitise model name for use as a directory component
-        label = cfg.llm.model.replace("/", "_").replace(":", "_").replace(" ", "_")
+        provider = create_provider(cfg.llm)
+        # Trigger auto-detection if model is null; sanitise for use as dir name
+        model_name = provider.model
+        label = model_name.replace("/", "_").replace(":", "_").replace(" ", "_")
     else:
         label = name or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     src = _PROJECT_ROOT / "data"
