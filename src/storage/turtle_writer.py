@@ -139,6 +139,9 @@ class TurtleWriter:
             uri = create_entity_uri(name)
             graph.add((uri, DOC.sourceDocument, doc_uri))
             type_uri = self.ontology_manager.get_ontology_class_uri(canonical_type)
+            # Propose unknown types for review, same as the is_a triple path.
+            if not self.ontology_manager.class_is_approved(canonical_type):
+                self.ontology_manager.propose_class(canonical_type, doc_name)
             graph.add((uri, RDF.type, type_uri))
             written_entity_uris.add(uri)
             # Write alternate name variants as kg:alternateName literals
