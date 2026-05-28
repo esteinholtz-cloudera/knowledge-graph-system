@@ -422,6 +422,78 @@ def clear_benchmark():
     print("Benchmark data cleared.")
 
 
+def archive_data(name: Optional[str] = None):
+    """
+    Copy data/ to data_save_<name|timestamp>, excluding benchmark.duckdb.
+    Update absolute paths in metadata.json and schema:url triples in TTL files
+    within the archive to reflect the new location.
+    """
+    import shutil
+    from datetime import datetime, timezone
+
+    label = name or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    src = _PROJECT_ROOT / "data"
+    dst = _PROJECT_ROOT / f"data_save_{label}"
+
+    if dst.exists():
+        print(f"Archive already exists: {dst}")
+        sys.exit(1)
+
+    # Files and dirs to exclude from the copy
+    EXCLUDE = {"benchmark.duckdb", "benchmark.duckdb.wal"}
+
+    def _ignore(directory, contents):
+        return [c for c in contents if c in EXCLUDE]
+
+    print(f"Archiving {src} → {dst} ...")
+    shutil.copytree(src, dst, ignore=_ignore)
+    print(f"  Copied (excluding benchmark.duckdb)")
+
+    # ── Update metadata.json ────────────────────────────────────────────────
+    meta_file = dst / "metadata.json"
+    if meta_file.exists():
+        import json
+        data = json.loads(meta_file.read_text(encoding="utf-8"))
+        old_data_str = str(src.resolve())
+        new_data_str = str(dst.resolve())
+        updated = 0
+        for doc in data.get("documents", {}).values():
+            for field in ("path", "kg_path"):
+                if field in doc and doc[field] and old_data_str in doc[field]:
+                    doc[field] = doc[field].replace(old_data_str, new_data_str)
+                    updated += 1
+        meta_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"  Updated {updated} path(s) in metadata.json")
+
+    # ── Update schema:url in TTL files ─────────────────────────────────────
+    from rdflib import Graph as RDFGraph
+    from rdflib.namespace import XSD
+    from rdflib import Literal as RDFLiteral
+    SCHEMA_URL = "http://schema.org/url"
+    old_data_str = str(src.resolve())
+    new_data_str = str(dst.resolve())
+    ttl_updated = 0
+
+    for ttl_file in (dst / "knowledge_graphs").glob("*.ttl"):
+        g = RDFGraph()
+        g.parse(str(ttl_file), format="turtle")
+        changes = []
+        for s, p, o in g:
+            if str(p) == SCHEMA_URL and isinstance(o, RDFLiteral) and old_data_str in str(o):
+                changes.append((s, p, o))
+        for s, p, o in changes:
+            g.remove((s, p, o))
+            new_val = str(o).replace(old_data_str, new_data_str)
+            g.add((s, p, RDFLiteral(new_val, datatype=XSD.string)))
+        if changes:
+            g.serialize(destination=str(ttl_file), format="turtle")
+            ttl_updated += 1
+
+    print(f"  Updated schema:url in {ttl_updated} TTL file(s)")
+    print(f"\nArchive complete: {dst}")
+    print("The benchmark database remains at: data/benchmark.duckdb")
+
+
 def approve_ontology(ontology_dir: str = "data/ontology"):
     """Replace ontology.ttl with the reviewed ontology_proposed.ttl."""
     from src.storage.ontology_manager import OntologyManager
@@ -453,6 +525,10 @@ def main():
     s.add_argument('--host', default='0.0.0.0')
     s.add_argument('--port', type=int, default=5000)
     s.add_argument('--debug', action='store_true')
+
+    # archive
+    arc_p = subparsers.add_parser('archive', help='Archive data/ to data_save_<name>')
+    arc_p.add_argument('--name', default=None, help='Archive name suffix (default: timestamp)')
 
     # ontology
     ont_p = subparsers.add_parser('ontology', help='Ontology management')
@@ -489,6 +565,9 @@ def main():
     elif args.command == 'server':
         from src.n8n.server import app
         app.run(host=args.host, port=args.port, debug=args.debug)
+
+    elif args.command == 'archive':
+        archive_data(name=args.name)
 
     elif args.command == 'ontology':
         if args.ont_command == 'approve':
