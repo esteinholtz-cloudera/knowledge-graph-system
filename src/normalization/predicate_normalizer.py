@@ -5,13 +5,14 @@ Scans all TTL files for ad-hoc kg: predicates, clusters semantically
 similar ones, maps clusters to a canonical controlled vocabulary via LLM,
 and optionally rewrites the TTL files.
 
-Two-phase workflow:
-  1. scan  — collects predicates, writes data/predicate_map.yaml for human review
-  2. apply — reads the reviewed map, rewrites TTL files, updates ontology.ttl
-             with owl:subPropertyOf declarations
+Workflow:
+  1. scan   — collects predicates, writes data/predicate_map.yaml
+  2. review — walks through each mapping interactively
+  3. apply  — rewrites TTL files + adds owl:subPropertyOf to ontology.ttl
 
 Run via:
   python main.py normalize scan
+  python main.py normalize review
   python main.py normalize apply
 """
 from __future__ import annotations

@@ -681,6 +681,7 @@ def run_normalize(subcommand: str, kg_dir: str, ontology_file: str,
                   map_file: str, dry_run: bool, no_llm: bool):
     """Predicate normalization: scan predicates, review map, apply rewrites."""
     from src.normalization.predicate_normalizer import build_predicate_map, apply_predicate_map
+    from src.normalization._review import interactive_review
     import yaml
 
     map_path = Path(map_file)
@@ -724,8 +725,10 @@ def run_normalize(subcommand: str, kg_dir: str, ontology_file: str,
         print(f"  {'Would rewrite' if dry_run else 'Rewrote'} {triples} triple(s) in {files} file(s)")
         if not dry_run:
             print(f"  owl:subPropertyOf declarations added to {ontology_file}")
+    elif subcommand == "review":
+        interactive_review(map_file)
     else:
-        print("Usage: python main.py normalize scan|apply [--dry-run] [--no-llm]")
+        print("Usage: python main.py normalize scan|review|apply [--dry-run] [--no-llm]")
 
 
 def main():
@@ -765,9 +768,10 @@ def main():
     norm_sub = norm_p.add_subparsers(dest='norm_command')
     norm_scan = norm_sub.add_parser('scan', help='Scan TTL files and write predicate_map.yaml')
     norm_scan.add_argument('--no-llm', action='store_true', help='Skip LLM suggestions, use string similarity only')
+    norm_review = norm_sub.add_parser('review', help='Interactively review predicate_map.yaml one mapping at a time')
     norm_apply = norm_sub.add_parser('apply', help='Apply reviewed predicate_map.yaml to TTL files')
     norm_apply.add_argument('--dry-run', action='store_true', help='Show changes without writing files')
-    for p_ in (norm_scan, norm_apply):
+    for p_ in (norm_scan, norm_review, norm_apply):
         p_.add_argument('--kg-dir', default='data/knowledge_graphs')
         p_.add_argument('--ontology-file', default='data/ontology/ontology.ttl')
         p_.add_argument('--map-file', default='data/predicate_map.yaml')
