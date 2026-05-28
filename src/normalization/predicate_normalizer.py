@@ -104,24 +104,21 @@ def _llm_map_cluster(cluster: List[str], llm_client) -> Tuple[str, str]:
     vocab = ", ".join(CANONICAL_PREDICATES)
     variants = ", ".join(cluster)
     prompt = (
-        f"Given this list of predicate variants from a knowledge graph:\n"
-        f"  {variants}\n\n"
-        f"Choose the single best canonical predicate from this vocabulary:\n"
-        f"  {vocab}\n\n"
-        f"If none fit, suggest a short camelCase verb.\n"
-        f'Respond with JSON: {{"canonical": "...", "reason": "..."}}'
+        f"Predicate variants: {variants}\n\n"
+        f"Canonical vocabulary: {vocab}\n\n"
+        f"Pick the best canonical predicate (or suggest a short camelCase verb).\n"
+        f'Reply with ONLY this JSON (reason must be ≤8 words): '
+        f'{{"canonical": "requires", "reason": "all express a requirement"}}'
     )
     try:
-        import json
         from ..extraction.json_utils import extract_json
         response = llm_client.generate(prompt=prompt, system_prompt=None,
-                                        max_new_tokens=128, temperature=0.1)
+                                       max_new_tokens=64, temperature=0.0)
         data = extract_json(response, prefer="object")
         if isinstance(data, dict) and data.get("canonical"):
             return str(data["canonical"]).strip(), str(data.get("reason", ""))
     except Exception:
         pass
-    # Fallback: pick the shortest variant as canonical
     return min(cluster, key=len), "fallback: shortest variant"
 
 
