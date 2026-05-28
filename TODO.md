@@ -18,6 +18,11 @@
 ## Pipeline
 
 - Pass 3: document-level concept extraction (overarching relationships across all sections)
-- Relationship deduplication: merge near-duplicate predicates (e.g. `uses` / `utilises`)
+- **Predicate normalization** — periodic pass that clusters ad-hoc predicates by embedding
+  similarity, maps clusters to a canonical controlled vocabulary via LLM, and rewrites TTL files;
+  generates `owl:subPropertyOf` declarations so existing predicates remain valid under inference
+- **N-ary relationship reification** — RE prompt emits optional `scope` / `strength` fields;
+  TTL writer reifies these into intermediate `ont:QualifiedRelation` nodes (W3C n-ary pattern)
+  enabling queries like "what requires HighAvailability for Kafka?"
 - **Chunking strategy**: evaluate sentence/paragraph boundary splitting vs current word-count
   splitting — boundary-aware chunks avoid cutting mid-sentence and may improve extraction quality

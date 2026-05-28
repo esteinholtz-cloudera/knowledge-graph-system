@@ -85,8 +85,24 @@ class RelationshipExtractor:
 
     @staticmethod
     def _filter_triples(raw: list) -> List[Dict]:
-        return [
-            t for t in raw
-            if isinstance(t, dict)
-            and t.get("subject") and t.get("predicate") and t.get("object")
-        ]
+        """
+        Validate and normalise extracted triples.
+        Passes through optional 'scope' and 'strength' fields for n-ary reification.
+        """
+        result = []
+        for t in raw:
+            if not isinstance(t, dict):
+                continue
+            if not (t.get("subject") and t.get("predicate") and t.get("object")):
+                continue
+            triple = {
+                "subject":   t["subject"],
+                "predicate": t["predicate"],
+                "object":    t["object"],
+            }
+            if t.get("scope"):
+                triple["scope"] = str(t["scope"]).strip()
+            if t.get("strength") and t["strength"] in ("mandatory", "recommended", "conditional"):
+                triple["strength"] = t["strength"]
+            result.append(triple)
+        return result

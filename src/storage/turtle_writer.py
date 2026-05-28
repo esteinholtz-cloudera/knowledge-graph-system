@@ -1,8 +1,9 @@
 """Write knowledge graphs to Turtle format."""
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from rdflib import Graph, Literal
+from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF
 
 from .ontology_manager import ISA_PREDICATES, OntologyManager
@@ -114,7 +115,7 @@ class TurtleWriter:
                 written_entity_uris.add(subj_uri)
 
             else:
-                # Regular relationship triple.
+                # Regular or n-ary relationship triple.
                 from .rdf_utils import create_predicate_uri
                 pred_uri = create_predicate_uri(predicate)
 
@@ -125,7 +126,27 @@ class TurtleWriter:
                 else:
                     obj_node = Literal(obj)
 
-                graph.add((subj_uri, pred_uri, obj_node))
+                scope = triple.get('scope', '').strip()
+                strength = triple.get('strength', '').strip()
+
+                if scope:
+                    # N-ary triple: reify into intermediate QualifiedRelation node.
+                    # Use a deterministic URI so re-runs are idempotent.
+                    rel_key = f"{subject}|{predicate}|{obj}|{scope}"
+                    rel_hash = hashlib.md5(rel_key.encode()).hexdigest()[:10]
+                    rel_uri = URIRef(str(KG) + f"rel_{rel_hash}")
+                    graph.add((rel_uri, RDF.type, ONT.QualifiedRelation))
+                    graph.add((rel_uri, KG.predicate, Literal(predicate)))
+                    graph.add((rel_uri, KG.object, obj_node))
+                    scope_node = create_entity_uri(scope)
+                    graph.add((rel_uri, KG.scope, scope_node))
+                    if strength:
+                        graph.add((rel_uri, KG.strength, Literal(strength)))
+                    graph.add((rel_uri, DOC.sourceDocument, doc_uri))
+                    graph.add((subj_uri, KG.hasQualifiedRelation, rel_uri))
+                else:
+                    graph.add((subj_uri, pred_uri, obj_node))
+
                 graph.add((subj_uri, DOC.sourceDocument, doc_uri))
                 written_entity_uris.add(subj_uri)
 

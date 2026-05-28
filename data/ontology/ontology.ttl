@@ -2,13 +2,27 @@
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 
-ont:Concept a owl:Class ;
-    rdfs:label "Concept" ;
-    rdfs:comment "An abstract concept or idea" .
+ont:Configuration a owl:Class ;
+    rdfs:label "Configuration" ;
+    rdfs:comment "Proposed from: ZDU_prereqs.txt; ZDU_prereqs.txt; ZDU_prereqs.txt" ;
+    rdfs:subClassOf ont:Technology ;
+    owl:equivalentClass <http://www.wikidata.org/entity/Q1866689>,
+        <http://www.wikidata.org/entity/Q5160117> .
 
 ont:Date a owl:Class ;
     rdfs:label "Date" ;
     rdfs:comment "A date or time period" .
+
+ont:Document a owl:Class ;
+    rdfs:label "Document" ;
+    rdfs:comment "Proposed from: ZDU_prereqs.txt; ZDU_prereqs.txt; ZDU_prereqs.txt" ;
+    rdfs:subClassOf ont:Other .
+
+ont:Error a owl:Class ;
+    rdfs:label "Error" ;
+    rdfs:comment "Proposed from: ZDU_prereqs.txt" ;
+    rdfs:subClassOf ont:flaw ;
+    owl:equivalentClass <http://www.wikidata.org/entity/Q29485> .
 
 ont:Event a owl:Class ;
     rdfs:label "Event" ;
@@ -27,10 +41,6 @@ ont:Organization a owl:Class ;
     rdfs:label "Organization" ;
     rdfs:comment "A company, institution, or group" .
 
-ont:Other a owl:Class ;
-    rdfs:label "Other" ;
-    rdfs:comment "Other type of entity" .
-
 ont:Person a owl:Class ;
     rdfs:label "Person" ;
     rdfs:comment "A human being or individual" .
@@ -44,6 +54,25 @@ ont:Railway a owl:Class ;
     rdfs:comment "Proposed from: industrial_revolution.txt (triple: Liverpool-Manchester Railway is_a railway); industrial_revolution.txt (triple: Transcontinental Railroad is_a railway)" ;
     rdfs:subClassOf ont:rail_network ;
     owl:equivalentClass <http://www.wikidata.org/entity/Q728937> .
+
+ont:Version a owl:Class ;
+    rdfs:label "Version" ;
+    rdfs:comment "Proposed from: ZDU_prereqs.txt; ZDU_prereqs.txt; ZDU_prereqs.txt; ZDU_prereqs.txt; ZDU_prereqs.txt" ;
+    rdfs:subClassOf ont:Technology .
+
+ont:Concept a owl:Class ;
+    rdfs:label "Concept" ;
+    rdfs:comment "An abstract concept or idea" .
+
+ont:Other a owl:Class ;
+    rdfs:label "Other" ;
+    rdfs:comment "Other type of entity" .
+
+ont:flaw a owl:Class ;
+    rdfs:label "flaw" ;
+    rdfs:comment "Added via Wikidata P279 lookup (wd:Q1747121)" ;
+    rdfs:subClassOf ont:undesirable_characteristic ;
+    owl:equivalentClass <http://www.wikidata.org/entity/Q1747121> .
 
 ont:rail_network a owl:Class ;
     rdfs:label "rail network" ;
@@ -64,7 +93,25 @@ ont:transport_network a owl:Class ;
     rdfs:subClassOf ont:transport_infrastructure ;
     owl:equivalentClass <http://www.wikidata.org/entity/Q924286> .
 
+ont:undesirable_characteristic a owl:Class ;
+    rdfs:label "undesirable characteristic" ;
+    rdfs:comment "Added via Wikidata P279 lookup (wd:Q29479670)" ;
+    rdfs:subClassOf ont:Concept ;
+    owl:equivalentClass <http://www.wikidata.org/entity/Q29479670> .
+
+<http://www.wikidata.org/entity/Q2678338> a owl:Class .
+
+<http://www.wikidata.org/entity/Q376799> a owl:Class .
+
+<http://www.wikidata.org/entity/Q57498564> a owl:Class .
+
+<http://www.wikidata.org/entity/Q728937> a owl:Class .
+
+<http://www.wikidata.org/entity/Q924286> a owl:Class .
+
 ont:Technology a owl:Class ;
     rdfs:label "Technology" ;
     rdfs:comment "A technology, tool, or platform" .
+
+[] a owl:Ontology .
 

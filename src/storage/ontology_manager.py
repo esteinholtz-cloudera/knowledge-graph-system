@@ -14,6 +14,7 @@ from .rdf_utils import ONT
 _DEFAULT_CLASSES = {
     'Person', 'Organization', 'Location', 'Technology',
     'Concept', 'Product', 'Event', 'Date', 'Other',
+    'QualifiedRelation',   # intermediate node for n-ary triples (scope/strength)
 }
 
 # Normalise LLM-emitted type strings to canonical class names.
