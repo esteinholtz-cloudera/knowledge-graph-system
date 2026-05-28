@@ -221,10 +221,9 @@ def apply_predicate_map(
         for variant, canonical in flat.items():
             var_uri = KG[variant]
             can_uri = KG[canonical]
-            # Only add if not already declared
-            if (var_uri, OWL.subPropertyOf, can_uri) not in ont_graph:
+            if (var_uri, RDFS.subPropertyOf, can_uri) not in ont_graph:
                 ont_graph.add((var_uri, RDF.type, OWL.ObjectProperty))
-                ont_graph.add((var_uri, OWL.subPropertyOf, can_uri))
+                ont_graph.add((var_uri, RDFS.subPropertyOf, can_uri))
                 ont_graph.add((can_uri, RDF.type, OWL.ObjectProperty))
         ont_graph.serialize(destination=ontology_file, format="turtle")
 
