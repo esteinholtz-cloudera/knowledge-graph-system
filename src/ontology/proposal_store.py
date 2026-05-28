@@ -16,7 +16,8 @@ from typing import Dict, List, Optional
 from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import OWL, RDF, RDFS
 
-ONT = Namespace("http://example.org/ontology/")
+ONT_BASE = "http://example.org/ontology/"
+ONT = Namespace(ONT_BASE)
 ONT_META = Namespace("http://example.org/ontology/meta/")
 WD = Namespace("http://www.wikidata.org/entity/")
 
@@ -71,8 +72,12 @@ class ProposalStore:
     # ------------------------------------------------------------------
 
     def get_pending(self) -> List[Dict]:
-        """Return proposed classes with status 'pending'."""
-        return self._get_by_status(STATUS_PENDING)
+        """Return proposed classes awaiting review (excludes classes already in ontology.ttl)."""
+        already = self._ontology_class_uris()
+        return [
+            cls for cls in self.get_all()
+            if cls.get("status") == "pending" and cls["uri"] not in already
+        ]
 
     def get_all(self) -> List[Dict]:
         """Return all proposed classes regardless of status."""
@@ -82,18 +87,30 @@ class ProposalStore:
                 results.append(self._load_class(cls))
         return results
 
-    def _get_by_status(self, status: Literal) -> List[Dict]:
-        return [
-            self._load_class(s)
-            for s, p, o in self._graph.triples((None, REVIEW_STATUS, status))
+    def _get_by_status(self, status: str) -> List[Dict]:
+        return [cls for cls in self.get_all() if cls.get("status") == status]
+
+    def _ontology_class_uris(self) -> set[str]:
+        """URIs of classes already present in the approved ontology file."""
+        if not self.ontology_file.exists():
+            return set()
+        ontology = Graph()
+        ontology.parse(str(self.ontology_file), format="turtle")
+        return {
+            str(s)
+            for s in ontology.subjects(RDF.type, OWL.Class)
             if str(s).startswith(str(ONT))
-        ]
+        }
+
+    def _class_status(self, uri: URIRef) -> str:
+        val = next(self._graph.objects(uri, REVIEW_STATUS), None)
+        return "pending" if val is None else str(val)
 
     def _load_class(self, uri: URIRef) -> Dict:
         g = self._graph
         label = str(next(g.objects(uri, RDFS.label), uri.split("/")[-1]))
         comment = str(next(g.objects(uri, RDFS.comment), ""))
-        status = str(next(g.objects(uri, REVIEW_STATUS), STATUS_PENDING))
+        status = self._class_status(uri)
         proposed_by = str(next(g.objects(uri, PROPOSED_BY), ""))
         subclass_of = [str(o) for _, _, o in g.triples((uri, RDFS.subClassOf, None))]
         equiv_class = [str(o) for _, _, o in g.triples((uri, OWL.equivalentClass, None))]
@@ -169,7 +186,7 @@ class ProposalStore:
         if self.ontology_file.exists():
             ontology.parse(str(self.ontology_file), format="turtle")
 
-        approved = self._get_by_status(STATUS_APPROVED)
+        approved = self._get_by_status("approved")
         if not approved:
             return 0
 
@@ -190,7 +207,7 @@ class ProposalStore:
                 self._graph.remove(triple)
 
         # If no pending classes remain, remove the proposal file
-        if not self.get_pending() and not self._get_by_status(STATUS_PENDING):
+        if not self.get_pending() and not self._get_by_status("pending"):
             if self.proposal_file.exists():
                 self.proposal_file.unlink()
         else:
@@ -200,13 +217,15 @@ class ProposalStore:
 
     def status_summary(self) -> Dict[str, int]:
         """Return counts by status."""
-        all_classes = self.get_all()
+        already = self._ontology_class_uris()
         counts: Dict[str, int] = {"pending": 0, "approved": 0, "rejected": 0, "needs_typing": 0}
-        for cls in all_classes:
+        for cls in self.get_all():
             s = cls.get("status", "pending")
-            counts[s] = counts.get(s, 0) + 1
-        # Also count entity re-typing proposals
-        counts["needs_typing"] += len(self.get_needs_typing())
+            if s == "pending" and cls["uri"] not in already:
+                counts["pending"] += 1
+            elif s in ("approved", "rejected"):
+                counts[s] += 1
+        counts["needs_typing"] = len(self.get_needs_typing())
         return counts
 
     # ------------------------------------------------------------------

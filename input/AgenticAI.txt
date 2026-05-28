@@ -1,0 +1,36 @@
+Agentic AI represents a major shift in artificial intelligence, moving from systems that simply generate content to systems that can act autonomously.
+While traditional generative AI (like a standard chatbot) operates on a passive prompt-and-response model, Agentic AI is goal-driven. You give it a high-level objective—such as "Book the most cost-effective flight itinerary for my business trip and log the expense"—and it will autonomously formulate a plan, use external software, handle setbacks, and execute the task with minimal human intervention.
+The Main Components of Agentic AI
+An agentic system relies on a continuous loop of Perception $\rightarrow$ Reasoning $\rightarrow$ Planning $\rightarrow$ Action. To do this effectively, the architecture of Agentic AI is generally broken down into four core components:
+                  ┌──────────────────────────────┐
+                  │          THE BRAIN           │
+                  │   (LLM / Reasoning Engine)   │
+                  └──────────────┬───────────────┘
+                                 │
+         ┌───────────────────────┼───────────────────────┐
+         ▼                       ▼                       ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│     MEMORY      │     │ PLANNING ENGINE │     │   TOOL/API-USE  │
+│ (Short & Long)  │     │ (Decomposition) │     │  (Integrations) │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+1. The Core Brain (The Reasoning Engine)
+At the center of any agent is a foundation model—typically a Large Language Model (LLM). Instead of just using this model to chat, Agentic AI treats the LLM as a cognitive core. It is responsible for understanding natural language objectives, evaluating contexts, parsing feedback from the environment, and deciding what to do next.
+2. The Planning Engine & Self-Reflection
+Complex tasks cannot be solved in a single step. The planning component allows the AI to break down a giant goal into smaller, manageable sub-tasks.
+	•	Task Decomposition: If the goal is to write a comprehensive research paper, the planning engine schedules individual steps: outline creation, data retrieval, drafting, and fact-checking. 
+	•	Self-Reflection & Correction: True agentic systems check their own work. If an agent calls an API and receives an error, or if a generated piece of code fails a test, the planning engine evaluates the failure, adjusts its strategy, and tries an alternate route (using frameworks like ReAct). 
+3. Memory Management
+To complete long-horizon tasks, an agent must retain information over time. Agentic memory is divided into two main types:
+	•	Short-term Memory: Keeps track of the current in-progress workflow, the active context, and the immediate steps just taken. 
+	•	Long-term Memory: Uses vector databases and semantic retrieval (often via Retrieval-Augmented Generation, or RAG) to retain facts, user preferences, and learnings across different sessions and days. 
+4. Tool and API Integration (Action Layer)
+An AI cannot be "agentic" if it is trapped inside a chat box. The action layer consists of a toolkit provided to the agent, which it can choose to execute via code or APIs. These tools include:
+	•	Web browsers for searching the internet.
+	•	Code interpreters to execute Python scripts on the fly.
+	•	Integrations with enterprise software (Slack, Salesforce, databases, emails). 
+Single-Agent vs. Multi-Agent Systems
+
+As Agentic AI matures, workflows are shifting from standalone agents to complex multi-agent ecosystems:
+	•	Single-Agent Workflows: One agent sequentially uses various tools to solve a problem. 
+	•	Multi-Agent Workflows: Complex problems are handed over to a "team" of specialized agents that collaborate. For example, in a software development workflow, you might have a Product Manager Agent defining requirements, a Coder Agent writing the script, and a QA Agent testing the code and sending bugs back to the coder—all orchestrated autonomously. 
+Would you like to explore how multi-agent frameworks handle collaboration, or see a specific use case of agentic AI in action?

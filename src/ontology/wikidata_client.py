@@ -121,11 +121,14 @@ class WikidataClient:
 
     def _tool_call(self, tool: str, arguments: Dict[str, Any]) -> str:
         result = self._call("tools/call", {"name": tool, "arguments": arguments})
-        # Extract text content from MCP tool result
         if isinstance(result, dict):
+            if result.get("isError"):
+                content = result.get("content", [])
+                msg = "\n".join(c.get("text", "") for c in content if c.get("type") == "text")
+                raise RuntimeError(msg or "tool returned isError")
             content = result.get("content", [])
             if isinstance(content, list):
-                return "".join(
+                return "\n".join(
                     c.get("text", "") for c in content if c.get("type") == "text"
                 )
             return str(result)
@@ -140,14 +143,24 @@ class WikidataClient:
         Search for Wikidata entities matching `query`.
         Returns list of {"qid", "label", "description"}.
         """
+        import re
         raw = self._tool_call("search_entity", {"query": query})
-        # The server returns a comma-separated list of QIDs or a JSON list
+
+        # Try JSON first, then fall back to regex extraction of Q-numbers.
+        # The MCP server may return JSON, comma/newline separated strings,
+        # or concatenated QIDs like "Q1234Q5678".
+        qids: List[str] = []
         try:
-            qids = json.loads(raw)
-            if isinstance(qids, str):
-                qids = [qids]
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                qids = [str(q).strip() for q in parsed if str(q).strip()]
+            elif isinstance(parsed, str):
+                qids = [parsed.strip()]
         except (json.JSONDecodeError, TypeError):
-            qids = [q.strip() for q in raw.split(",") if q.strip()]
+            pass
+
+        if not qids:
+            qids = re.findall(r'Q\d+', raw)
 
         results = []
         for qid in qids[:5]:  # cap at 5

@@ -200,5 +200,4 @@ Predicates (relationships) currently use ad-hoc `kg:` URIs. A future sprint will
 | Class hierarchy (`rdfs:subClassOf`) | ✓ Via interactive review |
 | Wikidata alignment (`owl:equivalentClass`) | ✓ Via `s` option |
 | Proposal accumulation across runs | ✓ |
-| Property definitions (`owl:ObjectProperty`) | Planned — next sprint |
-| External ontology import (`owl:imports`) | Planned |
+| Property definitions (`owl:ObjectProperty`), external ontology import | See `TODO.md` |

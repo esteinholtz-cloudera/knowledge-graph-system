@@ -131,7 +131,21 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
     run_start = time.monotonic()
     print(f"Processing document: {file_path}")
 
-    processor = DocumentProcessor()
+    app_config = load_config()
+
+    # Build extractors first so the model name is resolved (auto-detect fires here).
+    # The resolved model name is needed to apply per-model config overrides (chunk_size, etc.).
+    entity_extractor = EntityExtractor()
+    relationship_extractor = RelationshipExtractor()
+    resolved_model = entity_extractor.llm_client._provider.model
+
+    # Apply per-model overrides to get the effective LLM config for this run.
+    llm_cfg = app_config.llm.for_model(resolved_model)
+
+    processor = DocumentProcessor(
+        chunk_size=llm_cfg.chunk_size,
+        overlap=llm_cfg.overlap,
+    )
     doc_data = processor.process_document(file_path)
     document_id = Path(doc_data['filename']).stem  # e.g. "Skills_description"
 
@@ -144,15 +158,6 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         chunks = chunks[:max_chunks]
     else:
         print(f"Split into {len(chunks)} chunks")
-
-    app_config = load_config()
-
-    # Build extractors once so the model is resolved (auto-detect fires here)
-    entity_extractor = EntityExtractor()
-    relationship_extractor = RelationshipExtractor()
-
-    # Resolved model name (important when model: null in config)
-    resolved_model = entity_extractor.llm_client._provider.model
 
     # Open benchmark DB and start run record (no-op if duckdb not installed)
     bench = create_benchmark_store()
@@ -173,6 +178,7 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
     # ── Pass 1: entity extraction across all chunks ───────────────────────
     print(f"\n{'═' * 50}")
     print(f"  Pass 1 of 2 — Entity extraction")
+    print(f"  ({total_chunks} chunk(s) × {llm_cfg.chunk_size} words)")
     print(f"{'═' * 50}")
     all_entities = []
     chunk_entity_counts = []
@@ -290,7 +296,7 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
 
     # ── Pass 2: relationship extraction using canonical entity names ───────
     print(f"\n{'═' * 50}")
-    print(f"  Pass 2 of 2 — Relationship extraction")
+    print(f"  Pass 2 of 2 — Relationship extraction  (per-chunk)")
     print(f"{'═' * 50}")
     all_triples_set: set = set()
     all_triples = []
@@ -344,7 +350,63 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
             elapsed_s=elapsed,
         )
 
-    print(f"\nTotal unique triples: {len(all_triples)}")
+    print(f"\nTotal unique triples after Pass 2: {len(all_triples)}")
+
+    # ── Pass 2b: cross-section relationship extraction ────────────────────
+    # Groups consecutive chunks into sections and re-runs relationship extraction
+    # on each section text. Catches relationships between entities that don't
+    # co-occur within the same small chunk.
+    section_size = llm_cfg.section_size
+    if section_size > 1 and total_chunks > 1:
+        sections = [chunks[i:i + section_size] for i in range(0, total_chunks, section_size)]
+        # Only run sections that span more than one chunk
+        sections = [s for s in sections if len(s) > 1]
+
+    if section_size > 1 and total_chunks > 1 and sections:
+        print(f"\n{'═' * 50}")
+        print(f"  Pass 2b — Cross-section relationships ({len(sections)} section(s), {section_size} chunks each)")
+        print(f"{'═' * 50}")
+        triples_before_2b = len(all_triples)
+
+        for sec_idx, section_chunks in enumerate(sections):
+            sec_num = sec_idx + 1
+            # Reconstruct clean section text: strip the overlap prefix from all
+            # chunks after the first so boundary text isn't duplicated.
+            parts = [section_chunks[0]]
+            for chunk in section_chunks[1:]:
+                words = chunk.split()
+                parts.append(' '.join(words[llm_cfg.overlap:]))
+            section_text = ' '.join(parts)
+
+            chunk_range = f"{sec_idx * section_size + 1}–{sec_idx * section_size + len(section_chunks)}"
+            print(f"\n{'─' * 50}")
+            print(f"  Section {sec_num}/{len(sections)}  (chunks {chunk_range},  {len(section_text.split())} words)")
+            print(f"{'─' * 50}")
+            t0 = time.monotonic()
+
+            triples = relationship_extractor.extract(
+                section_text,
+                canonical_names,
+                progress_label=f"section {sec_num}/{len(sections)} · relationships",
+            )
+            elapsed = time.monotonic() - t0
+            bench.record_llm_call(run_id, "section_relationship_extraction", elapsed, chunk_number=sec_num)
+
+            new_count = 0
+            for t in triples:
+                subj = canonical_lookup.get(t.get('subject', '').lower(), t.get('subject', ''))
+                obj = canonical_lookup.get(t.get('object', '').lower(), t.get('object', ''))
+                t = {**t, 'subject': subj, 'object': obj}
+                key = (t['subject'], t.get('predicate', ''), t['object'])
+                if key not in all_triples_set:
+                    all_triples_set.add(key)
+                    all_triples.append(t)
+                    new_count += 1
+
+            print(f"  ✓ Relationships: {len(triples)} found, {new_count} new  ({elapsed:.1f}s)")
+
+        added = len(all_triples) - triples_before_2b
+        print(f"\nPass 2b added {added} new triple(s). Total unique triples: {len(all_triples)}")
 
     # Step 1: Generate TTL knowledge graph.
     print(f"\n1. Generating knowledge graph (TTL)...")

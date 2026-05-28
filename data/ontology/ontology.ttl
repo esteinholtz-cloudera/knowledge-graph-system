@@ -18,6 +18,11 @@ ont:Location a owl:Class ;
     rdfs:label "Location" ;
     rdfs:comment "A geographical place or location" .
 
+ont:Mcp_Server a owl:Class ;
+    rdfs:label "Mcp Server" ;
+    rdfs:comment "Proposed from: MCP.txt (triple: Git MCP Server isA MCP Server); MCP.txt (triple: Filesystem MCP Server isA MCP Server)" ;
+    rdfs:subClassOf ont:Technology .
+
 ont:Organization a owl:Class ;
     rdfs:label "Organization" ;
     rdfs:comment "A company, institution, or group" .

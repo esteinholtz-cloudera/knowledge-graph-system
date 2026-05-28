@@ -1,0 +1,24 @@
+The Model Context Protocol (MCP) is an open-source, standardized communication protocol originally introduced by Anthropic. Think of it as the "USB-C for AI." Before MCP, if you wanted an LLM to interact with GitHub, a PostgreSQL database, and Slack, you had to write custom integration code (the $N \times M$ complexity problem) for every single tool and model combination. MCP solves this by providing a universal standard so that any AI application can seamlessly discover, read, and interact with any data source or tool.
+The Purpose of MCP
+The core purpose of MCP is to standardize how Large Language Models securely access external context, data, and action layers. By acting as a universal remote control, MCP achieves three major goals:
+	•	Eliminating Custom Integrations: Developers implement the MCP standard once, unlocking a plug-and-play ecosystem of thousands of compliant tools and servers. 
+	•	Reducing Hallucinations: It gives models a standard way to pull fresh, authoritative, real-time data (e.g., checking actual logs or database rows) rather than relying on stale or guessed training data. 
+	•	Enabling Agentic Actions: It elevates LLMs from simple text generators to active agents capable of securely executing multi-step workflows across different environments. 
+The Anatomy of MCP
+MCP is heavily inspired by the Language Server Protocol (LSP) used in modern code editors like VS Code. It uses a clean Client-Server architecture structured into four primary layers:
+1. The Core Components
+	•	The Host Application: This is the environment the user actually interacts with and where the LLM lives (e.g., Claude Desktop, Cursor IDE, or a custom internal chatbot). 
+	•	The MCP Client: A lightweight client embedded directly within the Host application. It orchestrates the message loops, securely handles connections, and translates the LLM’s intents into protocol-compliant requests. 
+	•	The MCP Server: A separate, lightweight program that exposes specific data or capabilities (e.g., a "Git MCP Server" or a "Filesystem MCP Server"). It waits for requests from the client, executes the underlying task, and returns the response in a structured format. 
+2. The Three Protocol Primitives (Capabilities)
+MCP servers expose capabilities to the client using three primary building blocks:
+	•	Resources: Data that can be read. These are text or binary data sources the model can view, like local files, API responses, or database records. 
+	•	Tools: Functions that can be executed. These allow the model to take action and modify state, such as running a terminal command, creating a Jira ticket, or sending a Slack message. 
+	•	Prompts: Pre-built templates. These provide structured workflows or suggested user interactions (e.g., a "Review Code" prompt template) that the server exposes to guide the LLM. 
+3. The Transport Layer
+MCP determines how clients and servers talk to each other depending on where they are deployed:
+	•	Local (STDIO): The client directly spawns the server as a subprocess and communicates using Standard Input/Output (stdio). This is the default for desktop apps and coding IDEs.
+	•	Remote (Streamable HTTP / SSE): The server runs on a remote machine, and the client communicates with it over the network via Server-Sent Events (SSE) or modern Streamable HTTP protocols. 
+4. The Message Layer
+
+Under the hood, MCP uses JSON-RPC 2.0 as its lightweight, bidirectional messaging format. When a model wants to use a tool, a standard JSON message travels from the client to the server describing the function name and parameters, and the server returns a structured JSON object containing the result.
