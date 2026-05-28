@@ -23,11 +23,14 @@ _MCP_CMD = [
     "mcp-wikidata",
 ]
 
-# SPARQL to get the immediate superclasses (P279 = subclass of) of an entity
+# SPARQL to get the immediate superclasses (P279 = subclass of) of an entity.
+# Uses rdfs:label directly rather than wikibase:label service to avoid
+# Wikidata-specific extensions that require special client handling.
 _SUPERCLASS_SPARQL = """
 SELECT ?parent ?parentLabel WHERE {{
   wd:{qid} wdt:P279 ?parent .
-  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+  ?parent <http://www.w3.org/2000/01/rdf-schema#label> ?parentLabel .
+  FILTER(LANG(?parentLabel) = "en")
 }}
 LIMIT 5
 """
@@ -180,6 +183,38 @@ class WikidataClient:
                     results.append({"qid": qid, "label": qid, "description": ""})
         return results
 
+    @staticmethod
+    def _parse_sparql_rows(raw: str) -> List[Dict]:
+        """Parse a SPARQL result that may be a JSON array or concatenated JSON objects.
+
+        FastMCP serialises list-of-dict tool results as multiple MCP text content
+        blocks, which _tool_call joins with newlines. The result is a sequence of
+        multi-line JSON objects — neither a JSON array nor strict NDJSON.
+        json.JSONDecoder.raw_decode handles this by finding each object boundary.
+        """
+        raw = raw.strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            pass
+        decoder = json.JSONDecoder()
+        rows, idx = [], 0
+        while idx < len(raw):
+            while idx < len(raw) and raw[idx] in " \t\n\r":
+                idx += 1
+            if idx >= len(raw):
+                break
+            try:
+                obj, idx = decoder.raw_decode(raw, idx)
+                if isinstance(obj, dict):
+                    rows.append(obj)
+            except json.JSONDecodeError:
+                break
+        return rows
+
     def _batch_labels(self, qids: List[str]) -> Dict[str, Dict[str, str]]:
         """Fetch English labels and descriptions for multiple QIDs in one SPARQL call.
 
@@ -199,7 +234,7 @@ class WikidataClient:
         )
         try:
             raw = self._tool_call("execute_sparql", {"sparql_query": sparql})
-            rows = json.loads(raw)
+            rows = self._parse_sparql_rows(raw)
         except Exception:
             return {}
 
@@ -233,10 +268,10 @@ class WikidataClient:
         Result: list of {"qid", "label"}.
         """
         sparql = _SUPERCLASS_SPARQL.format(qid=qid)
-        raw = self._tool_call("execute_sparql", {"sparql_query": sparql})
         try:
-            rows = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
+            raw = self._tool_call("execute_sparql", {"sparql_query": sparql})
+            rows = self._parse_sparql_rows(raw)
+        except Exception:
             return []
         results = []
         for row in rows:

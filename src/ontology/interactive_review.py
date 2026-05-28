@@ -34,13 +34,23 @@ def _label_uri(uri: str) -> str:
     return uri
 
 
-def _print_proposals(proposals: List[Dict], wikidata_hits: Optional[List[Dict]] = None):
-    """Print the numbered proposal list."""
+def _print_proposals(
+    proposals: List[Dict],
+    wikidata_hits: Optional[List[Dict]] = None,
+    wikidata_parents: Optional[List[Dict]] = None,
+):
+    """Print LLM proposals and, when available, Wikidata P279 parent options."""
     if wikidata_hits:
         print("\n  Wikidata matches:")
         for i, hit in enumerate(wikidata_hits[:3], 1):
             desc = hit.get("description", "")[:70]
             print(f"    {i}. {hit['qid']}  \"{hit['label']}\" — {desc}")
+        print()
+
+    if wikidata_parents:
+        print("  Wikidata P279 superclass options (use 'w' to select):\n")
+        for i, p in enumerate(wikidata_parents, 1):
+            print(f"    {i}. wd:{p['qid']}  \"{p['label']}\"")
         print()
 
     print("  LLM placement proposals (ranked by confidence):\n")
@@ -52,6 +62,63 @@ def _print_proposals(proposals: List[Dict], wikidata_hits: Optional[List[Dict]] 
         print(f"           {p['reasoning']}")
         if i < len(proposals) - 1:
             print()
+
+
+def _print_wd_hits(hits: List[Dict]):
+    print()
+    for i, hit in enumerate(hits[:5], 1):
+        desc = hit.get("description", "")[:70]
+        print(f"  {i}. {hit['qid']}  \"{hit['label']}\" — {desc}")
+
+
+def _pick_wd_result(pick: str, hits: List[Dict], uri: str, store, wikidata_mode: str) -> List[Dict]:
+    """
+    Handle a numbered pick from a Wikidata search result list.
+    Sets owl:equivalentClass and fetches P279 parents.
+    Returns the parents list (empty if pick was cancelled or SPARQL failed).
+    """
+    if not (pick.isdigit() and 1 <= int(pick) <= len(hits)):
+        return []
+    selected = hits[int(pick) - 1]
+    qid = selected["qid"]
+    store.set_equivalent_class(uri, f"http://www.wikidata.org/entity/{qid}")
+    print(f"  → Added owl:equivalentClass wd:{qid}")
+    parents = _wikidata_superclasses(qid, wikidata_mode)
+    if parents:
+        print(f"  P279 chain: " + " → ".join(f"\"{p['label']}\"" for p in parents))
+        print("  (use 'w' to place under a Wikidata parent, or choose a/b/c/m)")
+    else:
+        print("  (No P279 superclasses found — use 'p' to pick a different result, or a/b/c/m)")
+    return parents
+
+
+def _accept_wikidata_parent(parent_info: Dict, store, ontology: Graph) -> tuple:
+    """
+    Resolve a Wikidata P279 parent to a local ontology URI.
+
+    If the parent label maps to an existing ont: class, returns (uri, None).
+    Otherwise creates a new *pending* class (so it enters the review queue)
+    and returns (uri, class_dict) — the caller should append class_dict to
+    the pending list so the chain is reviewed in the same session.
+    """
+    mapped = _map_wikidata_parents([parent_info], ontology)
+    if mapped:
+        return mapped, None
+
+    label = parent_info["label"]
+    qid = parent_info["qid"]
+    class_name = label.strip().title().replace(" ", "_")
+    new_uri = str(store.add_class(
+        label=label,
+        comment=f"Added via Wikidata P279 lookup (wd:{qid})",
+        proposed_by=f"wd:{qid}",
+        status="pending",
+    ))
+    store.set_equivalent_class(new_uri, f"http://www.wikidata.org/entity/{qid}")
+    print(f"  → Created pending class ont:{class_name} (≡ wd:{qid}) — will be reviewed next")
+    new_cls = {"uri": new_uri, "label": label, "comment": "", "status": "pending",
+               "proposed_by": f"wd:{qid}", "subclass_of": [], "equivalent_class": []}
+    return new_uri, new_cls
 
 
 def run_interactive_review(
@@ -114,12 +181,20 @@ def run_interactive_review(
                  "reasoning": "No LLM available — defaulting to top-level class"},
             ]
 
+        wikidata_parents: List[Dict] = []
+
         while True:
-            _print_proposals(proposals, wikidata_hits if wikidata_hits else None)
+            _print_proposals(proposals, wikidata_hits or None, wikidata_parents or None)
 
             letters = "".join(chr(ord("a") + i) for i in range(len(proposals)))
-            print(f"\n  d) Try again   s) Search Wikidata   m) Specify manually   r) Reject")
-            choice = input(f"\n  Choice [{letters}/d/s/m/r]: ").strip().lower()
+            wd_hint = "/w" if wikidata_parents else ""
+            p_hint  = "/p" if wikidata_hits else ""
+            extras = (
+                ("   w) Accept Wikidata parent" if wikidata_parents else "") +
+                ("   p) Re-pick from last search" if wikidata_hits else "")
+            )
+            print(f"\n  d) Try again   s) Search Wikidata{extras}   m) Specify manually   r) Reject")
+            choice = input(f"\n  Choice [{letters}{wd_hint}{p_hint}/d/s/m/r]: ").strip().lower()
 
             if choice == "r":
                 store.set_status(uri, "rejected")
@@ -145,32 +220,37 @@ def run_interactive_review(
                     print("  No results found.")
                     continue
                 wikidata_hits = hits
-                print()
-                for i, hit in enumerate(hits[:5], 1):
-                    desc = hit.get("description", "")[:70]
-                    print(f"  {i}. {hit['qid']}  \"{hit['label']}\" — {desc}")
+                wikidata_parents = []
+                _print_wd_hits(hits)
                 pick = input("\n  Pick result number (0 to cancel): ").strip()
-                if pick.isdigit() and 1 <= int(pick) <= len(hits):
-                    selected = hits[int(pick) - 1]
-                    qid = selected["qid"]
-                    # Get superclasses to infer subClassOf
-                    parents = _wikidata_superclasses(qid, wikidata_mode)
-                    equiv_uri = f"http://www.wikidata.org/entity/{qid}"
-                    store.set_equivalent_class(uri, equiv_uri)
-                    print(f"  → Added owl:equivalentClass wd:{qid}")
-                    if parents:
-                        mapped = _map_wikidata_parents(parents, ontology)
-                        if mapped:
-                            store.set_subclass_of(uri, mapped)
-                            store.set_status(uri, "approved")
-                            store.save()
-                            print(f"  → Added rdfs:subClassOf {_label_uri(mapped)}")
-                            print("  → Approved.")
-                            reviewed += 1
-                            break
-                        else:
-                            print("  (Could not map Wikidata parents to ontology — choose placement manually)")
+                wikidata_parents = _pick_wd_result(pick, hits, uri, store, wikidata_mode)
                 continue
+
+            elif choice == "p" and wikidata_hits:
+                _print_wd_hits(wikidata_hits)
+                pick = input("\n  Pick result number (0 to cancel): ").strip()
+                wikidata_parents = _pick_wd_result(pick, wikidata_hits, uri, store, wikidata_mode)
+                continue
+
+            elif choice == "w" and wikidata_parents:
+                pick = input(f"  Pick Wikidata parent (1–{len(wikidata_parents)}): ").strip()
+                if not (pick.isdigit() and 1 <= int(pick) <= len(wikidata_parents)):
+                    print("  Invalid choice.")
+                    continue
+                parent_info = wikidata_parents[int(pick) - 1]
+                parent_uri, new_cls = _accept_wikidata_parent(parent_info, store, ontology)
+                store.set_subclass_of(uri, parent_uri)
+                store.set_status(uri, "approved")
+                store.save()
+                print(f"  → rdfs:subClassOf {_label_uri(parent_uri)}")
+                print("  → Approved.")
+                reviewed += 1
+                if new_cls:
+                    # Parent class doesn't exist in ontology yet — add to review queue
+                    pending.append(new_cls)
+                    total = len(pending)
+                    print(f"  (ont:{parent_info['label'].title().replace(' ','_')} queued for placement — {total - idx} remaining)")
+                break
 
             elif choice == "m":
                 raw = input("  Parent URI or 'ont:ClassName' (blank = owl:Thing): ").strip()
