@@ -26,7 +26,7 @@ DEFAULT_API_KEY_ENV = {
 
 class LLMSettings(BaseModel):
     provider: LLMProvider = "ollama"
-    model: str = "llama3.2"
+    model: Optional[str] = None  # null = auto-detect from /v1/models (first loaded model)
     base_url: Optional[str] = None
     api_key_env: Optional[str] = None
     timeout_seconds: int = 120

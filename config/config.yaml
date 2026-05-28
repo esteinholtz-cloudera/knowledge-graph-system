@@ -4,16 +4,19 @@
 llm:
   # ollama | lmstudio | openai | anthropic | gemini
   provider: lmstudio
+  # null = auto-detect: uses the first model currently loaded in LM Studio
+  # (actual model name is still logged in benchmark data)
+  model: null
+  #model: gemma-4-26b-a4b-it-mlx
   #model: qwen3-30b-a3b-instruct-2507-mlx
   #model: qwen3-14b
-  model: gemma-4-26b-a4b-it-mlx
   # Optional override (defaults: Ollama http://localhost:11434/v1, LM Studio :1234/v1)
   base_url: http://127.0.0.1:1234/v1
   # Environment variable for API key (null = provider default; Ollama/LM Studio often need none)
   api_key_env: null
   timeout_seconds: 300
   temperature: 0.3
-  max_new_tokens: 4096
+  max_new_tokens: 16000
   # Prepend /no_think to disable extended reasoning on thinking models (qwen3, etc.)
   # Prevents token exhaustion before the JSON answer is emitted.
   disable_thinking: true

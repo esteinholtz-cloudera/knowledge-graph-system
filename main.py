@@ -8,7 +8,7 @@ from typing import Optional
 from src.config.settings import load_config
 from src.document.processor import DocumentProcessor
 from src.document.html_markup import HTMLMarkupGenerator
-from src.extraction.entity_extractor import EntityExtractor
+from src.extraction.entity_extractor import EntityExtractor, ExtractionError
 from src.extraction.entity_resolver import EntityResolver
 from src.extraction.relationship_extractor import RelationshipExtractor
 from src.storage.benchmark_store import create_benchmark_store, BenchmarkStore
@@ -43,7 +43,14 @@ def run_precheck() -> bool:
         resp = httpx.get(f"{base_url}/models", headers=headers, timeout=8)
         resp.raise_for_status()
         available = [m["id"] for m in resp.json().get("data", [])]
-        if llm.model in available:
+        if llm.model is None:
+            # Auto-detect: use first available
+            if available:
+                print(f"  ✓ LLM model:      {available[0]} (auto-detected)")
+            else:
+                print(f"  ✗ LLM model:      no models available at {base_url}")
+                all_ok = False
+        elif llm.model in available:
             print(f"  ✓ LLM model:      {llm.model}")
         else:
             print(f"  ✗ LLM model:      {llm.model!r} NOT found at {base_url}")
@@ -140,6 +147,13 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
 
     app_config = load_config()
 
+    # Build extractors once so the model is resolved (auto-detect fires here)
+    entity_extractor = EntityExtractor()
+    relationship_extractor = RelationshipExtractor()
+
+    # Resolved model name (important when model: null in config)
+    resolved_model = entity_extractor.llm_client._provider.model
+
     # Open benchmark DB and start run record (no-op if duckdb not installed)
     bench = create_benchmark_store()
     run_id = bench.start_run(
@@ -147,14 +161,11 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         document_id=document_id,
         word_count=doc_data['word_count'],
         llm_provider=app_config.llm.provider,
-        llm_model=app_config.llm.model,
+        llm_model=resolved_model,
         resolution_enabled=app_config.entity_resolution.enabled,
         resolution_strategies=list(app_config.entity_resolution.strategies),
         max_chunks=max_chunks,
     )
-
-    entity_extractor = EntityExtractor()
-    relationship_extractor = RelationshipExtractor()
 
     total_chunks = len(chunks)
     chunk_times: list = []
@@ -181,10 +192,22 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
         print(f"{'─' * 50}")
         t0 = time.monotonic()
 
-        entities = entity_extractor.extract(
-            chunk,
-            progress_label=f"chunk {chunk_num}/{total_chunks} · entities",
-        )
+        try:
+            entities = entity_extractor.extract(
+                chunk,
+                progress_label=f"chunk {chunk_num}/{total_chunks} · entities",
+            )
+        except ExtractionError as exc:
+            bench.close()
+            print(f"\n{'═' * 50}")
+            print(f"  EXTRACTION ERROR — chunk {chunk_num}/{total_chunks}")
+            print(f"{'═' * 50}")
+            print(str(exc))
+            print("\nHints:")
+            print("  • Set disable_thinking: true in config.yaml for thinking models")
+            print("  • Try a different model or adjust the entity extraction prompt")
+            print("  • Use --max-chunks 1 to isolate which chunk fails")
+            sys.exit(1)
         elapsed = time.monotonic() - t0
         bench.record_llm_call(run_id, "entity_extraction", elapsed, chunk_number=chunk_num)
         all_entities.extend(entities)
@@ -422,6 +445,110 @@ def clear_benchmark():
     print("Benchmark data cleared.")
 
 
+# Subdirectories of data/ that should always exist (recreated after archive clear)
+_DATA_SUBDIRS = ["documents", "knowledge_graphs", "ontology"]
+
+
+def archive_data(name: Optional[str] = None, llmnamed: bool = False):
+    """
+    Copy data/ to data_save_<name|timestamp>, excluding benchmark.duckdb.
+    Update absolute paths in metadata.json and schema:url triples in TTL files
+    within the archive to reflect the new location.
+    Then clear data/ (except benchmark.duckdb) and recreate empty subdirectories.
+    """
+    import shutil
+    from datetime import datetime, timezone
+
+    if llmnamed:
+        from src.extraction.providers.factory import create_provider
+        cfg = load_config()
+        provider = create_provider(cfg.llm)
+        # Trigger auto-detection if model is null; sanitise for use as dir name
+        model_name = provider.model
+        label = model_name.replace("/", "_").replace(":", "_").replace(" ", "_")
+    else:
+        label = name or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    src = _PROJECT_ROOT / "data"
+    dst = _PROJECT_ROOT / f"data_save_{label}"
+
+    if dst.exists():
+        print(f"Archive already exists: {dst}")
+        sys.exit(1)
+
+    # Files and dirs to exclude from the copy
+    EXCLUDE = {"benchmark.duckdb", "benchmark.duckdb.wal"}
+
+    def _ignore(directory, contents):
+        return [c for c in contents if c in EXCLUDE]
+
+    print(f"Archiving {src} → {dst} ...")
+    shutil.copytree(src, dst, ignore=_ignore)
+    print(f"  Copied (excluding benchmark.duckdb)")
+
+    # ── Update metadata.json ────────────────────────────────────────────────
+    meta_file = dst / "metadata.json"
+    if meta_file.exists():
+        import json
+        data = json.loads(meta_file.read_text(encoding="utf-8"))
+        old_data_str = str(src.resolve())
+        new_data_str = str(dst.resolve())
+        updated = 0
+        for doc in data.get("documents", {}).values():
+            for field in ("path", "kg_path"):
+                if field in doc and doc[field] and old_data_str in doc[field]:
+                    doc[field] = doc[field].replace(old_data_str, new_data_str)
+                    updated += 1
+        meta_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"  Updated {updated} path(s) in metadata.json")
+
+    # ── Update schema:url in TTL files ─────────────────────────────────────
+    from rdflib import Graph as RDFGraph
+    from rdflib.namespace import XSD
+    from rdflib import Literal as RDFLiteral
+    SCHEMA_URL = "http://schema.org/url"
+    old_data_str = str(src.resolve())
+    new_data_str = str(dst.resolve())
+    ttl_updated = 0
+
+    for ttl_file in (dst / "knowledge_graphs").glob("*.ttl"):
+        g = RDFGraph()
+        g.parse(str(ttl_file), format="turtle")
+        changes = []
+        for s, p, o in g:
+            if str(p) == SCHEMA_URL and isinstance(o, RDFLiteral) and old_data_str in str(o):
+                changes.append((s, p, o))
+        for s, p, o in changes:
+            g.remove((s, p, o))
+            new_val = str(o).replace(old_data_str, new_data_str)
+            g.add((s, p, RDFLiteral(new_val, datatype=XSD.string)))
+        if changes:
+            g.serialize(destination=str(ttl_file), format="turtle")
+            ttl_updated += 1
+
+    print(f"  Updated schema:url in {ttl_updated} TTL file(s)")
+
+    # ── Clear data/ and recreate empty subdirectory structure ───────────────
+    KEEP = {"benchmark.duckdb", "benchmark.duckdb.wal"}
+    for item in src.iterdir():
+        if item.name in KEEP:
+            continue
+        if item.is_dir():
+            shutil.rmtree(item)
+        else:
+            item.unlink()
+    for subdir in _DATA_SUBDIRS:
+        (src / subdir).mkdir(exist_ok=True)
+    # Restore the base ontology (not the run-specific proposed file)
+    ontology_src = dst / "ontology" / "ontology.ttl"
+    if ontology_src.exists():
+        shutil.copy2(ontology_src, src / "ontology" / "ontology.ttl")
+    print(f"  Cleared data/ and recreated empty subdirectories")
+    print(f"  Restored ontology.ttl to data/ontology/")
+
+    print(f"\nArchive complete: {dst}")
+    print("The benchmark database remains at: data/benchmark.duckdb")
+
+
 def approve_ontology(ontology_dir: str = "data/ontology"):
     """Replace ontology.ttl with the reviewed ontology_proposed.ttl."""
     from src.storage.ontology_manager import OntologyManager
@@ -453,6 +580,11 @@ def main():
     s.add_argument('--host', default='0.0.0.0')
     s.add_argument('--port', type=int, default=5000)
     s.add_argument('--debug', action='store_true')
+
+    # archive
+    arc_p = subparsers.add_parser('archive', help='Archive data/ to data_save_<name> and reset data/')
+    arc_p.add_argument('--name', default=None, help='Archive name suffix (default: timestamp)')
+    arc_p.add_argument('--llmnamed', action='store_true', help='Name the archive after the current LLM model')
 
     # ontology
     ont_p = subparsers.add_parser('ontology', help='Ontology management')
@@ -489,6 +621,9 @@ def main():
     elif args.command == 'server':
         from src.n8n.server import app
         app.run(host=args.host, port=args.port, debug=args.debug)
+
+    elif args.command == 'archive':
+        archive_data(name=args.name, llmnamed=args.llmnamed)
 
     elif args.command == 'ontology':
         if args.ont_command == 'approve':

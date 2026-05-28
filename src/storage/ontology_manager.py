@@ -45,6 +45,7 @@ class OntologyManager:
         self.graph = Graph()
         self._proposals: Dict[str, Dict] = {}  # class_name -> {uri, label, sources}
         self._load_ontology()
+        self._load_existing_proposals()
 
     # ------------------------------------------------------------------
     # Loading / saving
@@ -57,6 +58,33 @@ class OntologyManager:
         else:
             self._create_default_ontology()
             self._save_ontology()
+
+    def _load_existing_proposals(self):
+        """Seed _proposals from any existing ontology_proposed.ttl.
+
+        This ensures a successive pipeline run does not overwrite unapproved
+        proposals from a previous run — new proposals are merged in.
+        """
+        if not self.proposed_file.exists():
+            return
+        try:
+            prior = Graph()
+            prior.parse(str(self.proposed_file), format='turtle')
+            for class_uri, _, _ in prior.triples((None, RDF.type, OWL.Class)):
+                # Only load classes that are NOT already in the approved ontology
+                if (class_uri, RDF.type, OWL.Class) in self.graph:
+                    continue
+                label = str(next(prior.objects(class_uri, RDFS.label), class_uri))
+                comment = str(next(prior.objects(class_uri, RDFS.comment), ""))
+                sources = [s.strip() for s in comment.replace("Proposed from: ", "").split(";") if s.strip()] if comment else []
+                if label not in self._proposals:
+                    self._proposals[label] = {
+                        'uri': class_uri,
+                        'label': label,
+                        'sources': sources,
+                    }
+        except Exception:
+            pass  # Corrupt or unreadable proposed file — start fresh
 
     def _create_default_ontology(self):
         """Create default OWL ontology with base entity-type classes."""
@@ -160,10 +188,7 @@ class OntologyManager:
         The file is a complete, valid Turtle file so reviewers have full context.
         """
         if not self._proposals:
-            # Remove stale proposed file if nothing new to suggest.
-            if self.proposed_file.exists():
-                self.proposed_file.unlink()
-            return
+            return  # Nothing to write; don't delete any pre-existing proposals
 
         # Start from a copy of the current approved graph.
         proposed_graph = Graph()
@@ -189,9 +214,15 @@ class OntologyManager:
         by = f" by {generated_by}" if generated_by else ""
         header = (
             f"# ontology_proposed.ttl — generated {ts}{by}\n"
-            f"# Review proposed additions below, then run:\n"
-            f"#   cp data/ontology/ontology_proposed.ttl data/ontology/ontology.ttl\n"
-            f"# or: python main.py ontology approve\n\n"
+            f"#\n"
+            f"# This file contains the FULL current ontology PLUS the proposed additions\n"
+            f"# listed at the bottom. It is safe to use as the new ontology.ttl.\n"
+            f"#\n"
+            f"# To approve all proposed additions, run:\n"
+            f"#   python main.py ontology approve\n"
+            f"#\n"
+            f"# To approve selectively, edit this file first (remove unwanted classes),\n"
+            f"# then run the approve command.\n\n"
         )
         self.proposed_file.write_text(header + ttl_text, encoding='utf-8')
 

@@ -35,9 +35,18 @@ def _find_balanced(text: str, open_char: str, close_char: str, start: int) -> Op
 
 
 def _strip_fences(text: str) -> str:
-    """Remove markdown code fences (```json ... ``` or ``` ... ```)."""
+    """Remove markdown code fences and XML wrappers around JSON content."""
+    # Strip markdown fences (```json ... ``` or ``` ... ```)
     text = re.sub(r'```(?:json)?\s*', '', text)
     text = re.sub(r'```', '', text)
+    # Strip outermost XML/HTML-style tags that some models wrap around JSON,
+    # e.g. <entities>[...]</entities> or <response>{...}</response>
+    # Repeat in case of nested wrappers.
+    for _ in range(5):
+        stripped = re.sub(r'^\s*<[^>]+>\s*([\s\S]*?)\s*</[^>]+>\s*$', r'\1', text.strip())
+        if stripped == text.strip():
+            break
+        text = stripped
     return text
 
 
@@ -68,6 +77,11 @@ def extract_json(response: str, prefer: str = "array") -> Any:
             continue
         span = _find_balanced(cleaned, open_ch, close_ch, start)
         if span is None:
+            # Array/object is truncated — try partial recovery for arrays.
+            if open_ch == '[':
+                recovered = _recover_partial_array(cleaned, start)
+                if recovered is not None:
+                    return recovered
             continue
         try:
             return json.loads(span)
@@ -81,4 +95,35 @@ def extract_json(response: str, prefer: str = "array") -> Any:
                 continue
 
     logger.warning("Could not extract JSON from LLM response. Raw response:\n%s", response[:1000])
+    return None
+
+
+def _recover_partial_array(text: str, array_start: int) -> Optional[Any]:
+    """
+    When a JSON array is truncated (no closing ]), extract every complete
+    {...} object inside it and return them as a list.
+    """
+    objects = []
+    pos = array_start + 1  # skip the opening [
+    while pos < len(text):
+        # Find the next {
+        obj_start = text.find('{', pos)
+        if obj_start == -1:
+            break
+        span = _find_balanced(text, '{', '}', obj_start)
+        if span is None:
+            break  # This object is also truncated — stop here
+        try:
+            obj = json.loads(span)
+            objects.append(obj)
+        except json.JSONDecodeError:
+            pass
+        pos = obj_start + len(span)
+
+    if objects:
+        logger.warning(
+            "JSON array was truncated; recovered %d complete object(s). "
+            "Consider raising max_new_tokens.", len(objects)
+        )
+        return objects
     return None

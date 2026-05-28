@@ -15,16 +15,43 @@ class OpenAICompatibleProvider(LLMProviderBase):
     def __init__(
         self,
         base_url: str,
-        model: str,
+        model: Optional[str],
         api_key: Optional[str] = None,
         timeout_seconds: int = 120,
         disable_thinking: bool = False,
     ):
         self.base_url = base_url.rstrip("/")
-        self.model = model
+        self._configured_model = model  # None = auto-detect
+        self._resolved_model: Optional[str] = None  # cached after first detection
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
         self.disable_thinking = disable_thinking
+
+    @property
+    def model(self) -> str:
+        """Return the resolved model name, auto-detecting if necessary."""
+        if self._resolved_model:
+            return self._resolved_model
+        if self._configured_model:
+            self._resolved_model = self._configured_model
+            return self._resolved_model
+        # Auto-detect: use the first model listed by the server
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.get(f"{self.base_url}/models", headers=headers)
+                resp.raise_for_status()
+                models = resp.json().get("data", [])
+                if not models:
+                    raise ValueError("No models available on the server")
+                self._resolved_model = models[0]["id"]
+                import sys
+                sys.stderr.write(f"[auto] model: {self._resolved_model}\n")
+                return self._resolved_model
+        except Exception as e:
+            raise ValueError(f"Could not auto-detect model from {self.base_url}/models: {e}")
 
     def generate(
         self,
