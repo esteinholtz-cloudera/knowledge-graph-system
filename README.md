@@ -174,8 +174,10 @@ uv run python main.py process <path-to-document> --max-chunks 3
 # Approve proposed ontology additions after reviewing ontology_proposed.ttl
 uv run python main.py ontology approve
 
-# Archive current data/ to data_save_<name> (benchmark.duckdb stays in place)
+# Archive current data/ to data_save_<name>; resets data/ for the next run
 uv run python main.py archive --name my_run_1
+# Name the archive after the current LLM model
+uv run python main.py archive --llmnamed
 
 # View benchmark metrics (requires: uv sync --extra benchmark)
 uv run python main.py benchmark show

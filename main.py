@@ -422,16 +422,26 @@ def clear_benchmark():
     print("Benchmark data cleared.")
 
 
-def archive_data(name: Optional[str] = None):
+# Subdirectories of data/ that should always exist (recreated after archive clear)
+_DATA_SUBDIRS = ["documents", "knowledge_graphs", "ontology"]
+
+
+def archive_data(name: Optional[str] = None, llmnamed: bool = False):
     """
     Copy data/ to data_save_<name|timestamp>, excluding benchmark.duckdb.
     Update absolute paths in metadata.json and schema:url triples in TTL files
     within the archive to reflect the new location.
+    Then clear data/ (except benchmark.duckdb) and recreate empty subdirectories.
     """
     import shutil
     from datetime import datetime, timezone
 
-    label = name or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    if llmnamed:
+        cfg = load_config()
+        # Sanitise model name for use as a directory component
+        label = cfg.llm.model.replace("/", "_").replace(":", "_").replace(" ", "_")
+    else:
+        label = name or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     src = _PROJECT_ROOT / "data"
     dst = _PROJECT_ROOT / f"data_save_{label}"
 
@@ -490,6 +500,25 @@ def archive_data(name: Optional[str] = None):
             ttl_updated += 1
 
     print(f"  Updated schema:url in {ttl_updated} TTL file(s)")
+
+    # ── Clear data/ and recreate empty subdirectory structure ───────────────
+    KEEP = {"benchmark.duckdb", "benchmark.duckdb.wal"}
+    for item in src.iterdir():
+        if item.name in KEEP:
+            continue
+        if item.is_dir():
+            shutil.rmtree(item)
+        else:
+            item.unlink()
+    for subdir in _DATA_SUBDIRS:
+        (src / subdir).mkdir(exist_ok=True)
+    # Restore the base ontology (not the run-specific proposed file)
+    ontology_src = dst / "ontology" / "ontology.ttl"
+    if ontology_src.exists():
+        shutil.copy2(ontology_src, src / "ontology" / "ontology.ttl")
+    print(f"  Cleared data/ and recreated empty subdirectories")
+    print(f"  Restored ontology.ttl to data/ontology/")
+
     print(f"\nArchive complete: {dst}")
     print("The benchmark database remains at: data/benchmark.duckdb")
 
@@ -527,8 +556,9 @@ def main():
     s.add_argument('--debug', action='store_true')
 
     # archive
-    arc_p = subparsers.add_parser('archive', help='Archive data/ to data_save_<name>')
+    arc_p = subparsers.add_parser('archive', help='Archive data/ to data_save_<name> and reset data/')
     arc_p.add_argument('--name', default=None, help='Archive name suffix (default: timestamp)')
+    arc_p.add_argument('--llmnamed', action='store_true', help='Name the archive after the current LLM model')
 
     # ontology
     ont_p = subparsers.add_parser('ontology', help='Ontology management')
@@ -567,7 +597,7 @@ def main():
         app.run(host=args.host, port=args.port, debug=args.debug)
 
     elif args.command == 'archive':
-        archive_data(name=args.name)
+        archive_data(name=args.name, llmnamed=args.llmnamed)
 
     elif args.command == 'ontology':
         if args.ont_command == 'approve':
