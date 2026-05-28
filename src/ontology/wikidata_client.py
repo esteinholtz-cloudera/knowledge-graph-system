@@ -162,13 +162,55 @@ class WikidataClient:
         if not qids:
             qids = re.findall(r'Q\d+', raw)
 
+        qids = qids[:5]
+        # Batch-fetch labels+descriptions in one SPARQL call rather than one
+        # get_metadata call per QID — avoids repeated API calls that trigger 403s.
+        labels = self._batch_labels(qids)
+
         results = []
-        for qid in qids[:5]:  # cap at 5
-            try:
-                meta = self.get_metadata(qid)
-                results.append({"qid": qid, "label": meta["label"], "description": meta["description"]})
-            except Exception:
-                results.append({"qid": qid, "label": qid, "description": ""})
+        for qid in qids:
+            if qid in labels:
+                results.append({"qid": qid, **labels[qid]})
+            else:
+                # SPARQL batch failed for this QID; fall back to get_metadata
+                try:
+                    meta = self.get_metadata(qid)
+                    results.append({"qid": qid, "label": meta["label"], "description": meta["description"]})
+                except Exception:
+                    results.append({"qid": qid, "label": qid, "description": ""})
+        return results
+
+    def _batch_labels(self, qids: List[str]) -> Dict[str, Dict[str, str]]:
+        """Fetch English labels and descriptions for multiple QIDs in one SPARQL call.
+
+        Uses rdfs:label directly rather than the wikibase:label service to avoid
+        dependency on Wikidata-specific extensions that can be unreliable.
+        """
+        if not qids:
+            return {}
+        values = " ".join(f"wd:{q}" for q in qids)
+        sparql = (
+            "SELECT ?item ?label ?desc WHERE { "
+            f"VALUES ?item {{ {values} }} "
+            "?item <http://www.w3.org/2000/01/rdf-schema#label> ?label . "
+            "FILTER(LANG(?label) = \"en\") "
+            "OPTIONAL { ?item <https://schema.org/description> ?desc . FILTER(LANG(?desc) = \"en\") } "
+            "}"
+        )
+        try:
+            raw = self._tool_call("execute_sparql", {"sparql_query": sparql})
+            rows = json.loads(raw)
+        except Exception:
+            return {}
+
+        results: Dict[str, Dict[str, str]] = {}
+        for row in rows:
+            uri = (row.get("item") or {}).get("value", "")
+            qid = uri.split("/")[-1] if "/" in uri else ""
+            label = (row.get("label") or {}).get("value", "")
+            desc = (row.get("desc") or {}).get("value", "")
+            if qid and label:
+                results[qid] = {"label": label, "description": desc}
         return results
 
     def get_metadata(self, entity_id: str) -> Dict[str, str]:
@@ -177,13 +219,13 @@ class WikidataClient:
         try:
             data = json.loads(raw)
             if isinstance(data, dict):
-                return {
-                    "label": data.get("label", entity_id),
-                    "description": data.get("description", ""),
-                }
+                label = (data.get("label") or "").strip()
+                desc = (data.get("description") or "").strip()
+                if label:
+                    return {"label": label, "description": desc}
         except (json.JSONDecodeError, TypeError):
             pass
-        return {"label": entity_id, "description": raw[:200] if raw else ""}
+        return {"label": entity_id, "description": ""}
 
     def get_superclasses(self, qid: str) -> List[Dict[str, str]]:
         """
