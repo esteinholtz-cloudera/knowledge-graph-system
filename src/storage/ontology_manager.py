@@ -214,9 +214,15 @@ class OntologyManager:
         by = f" by {generated_by}" if generated_by else ""
         header = (
             f"# ontology_proposed.ttl — generated {ts}{by}\n"
-            f"# Review proposed additions below, then run:\n"
-            f"#   cp data/ontology/ontology_proposed.ttl data/ontology/ontology.ttl\n"
-            f"# or: python main.py ontology approve\n\n"
+            f"#\n"
+            f"# This file contains the FULL current ontology PLUS the proposed additions\n"
+            f"# listed at the bottom. It is safe to use as the new ontology.ttl.\n"
+            f"#\n"
+            f"# To approve all proposed additions, run:\n"
+            f"#   python main.py ontology approve\n"
+            f"#\n"
+            f"# To approve selectively, edit this file first (remove unwanted classes),\n"
+            f"# then run the approve command.\n\n"
         )
         self.proposed_file.write_text(header + ttl_text, encoding='utf-8')
 
