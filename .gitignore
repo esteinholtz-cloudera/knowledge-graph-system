@@ -41,6 +41,7 @@ data/ontology/ontology_proposed.ttl
 data/benchmark.duckdb
 data/benchmark.duckdb.wal
 test/data_*/
+test/benchmark_*.rtf
 
 # Keep directory structure
 !data/knowledge_graphs/.gitkeep
