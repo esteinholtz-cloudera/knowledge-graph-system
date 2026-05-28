@@ -94,6 +94,15 @@ class ExtractionSettings(BaseModel):
     relationship_extraction: dict = Field(default_factory=lambda: {"enabled": True})
 
 
+class OntologySettings(BaseModel):
+    # How to reach the Wikidata MCP server:
+    #   subprocess — launch via uvx each time (no setup needed)
+    #   http       — connect to a running HTTP server (future)
+    #   disabled   — skip Wikidata lookups
+    wikidata_mcp: Literal["subprocess", "http", "disabled"] = "subprocess"
+    wikidata_mcp_url: Optional[str] = None  # used only when mode=http
+
+
 class VisualizationSettings(BaseModel):
     # Path to the ai-knowledge-graph project (for ttl_to_html.py graph generation).
     # null = auto-detect sibling directory ~/src/ai-knowledge-graph.
@@ -121,6 +130,7 @@ class AppSettings(BaseModel):
     n8n: N8nSettings = Field(default_factory=N8nSettings)
     extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
     entity_resolution: EntityResolutionSettings = Field(default_factory=EntityResolutionSettings)
+    ontology: OntologySettings = Field(default_factory=OntologySettings)
     visualization: VisualizationSettings = Field(default_factory=VisualizationSettings)
 
 

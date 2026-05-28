@@ -549,6 +549,52 @@ def archive_data(name: Optional[str] = None, llmnamed: bool = False):
     print("The benchmark database remains at: data/benchmark.duckdb")
 
 
+def show_ontology_status(ontology_dir: str = "data/ontology"):
+    """Show pending ontology proposals and their review status."""
+    from src.ontology.proposal_store import ProposalStore
+    proposal_file = _PROJECT_ROOT / ontology_dir / "ontology_proposed.ttl"
+    ontology_file = _PROJECT_ROOT / ontology_dir / "ontology.ttl"
+    if not proposal_file.exists():
+        print("No pending ontology proposals.")
+        return
+    store = ProposalStore(str(proposal_file), str(ontology_file))
+    summary = store.status_summary()
+    print(f"\nOntology proposals:")
+    print(f"  Pending:  {summary.get('pending', 0)}")
+    print(f"  Approved: {summary.get('approved', 0)}")
+    print(f"  Rejected: {summary.get('rejected', 0)}")
+    pending = store.get_pending()
+    if pending:
+        print(f"\nPending classes:")
+        for cls in pending:
+            src = cls.get('proposed_by', '')
+            print(f"  • {cls['label']}" + (f"  ← {src}" if src else ""))
+        print(f"\nRun: python main.py ontology review")
+
+
+def run_ontology_review(ontology_dir: str = "data/ontology"):
+    """Interactively review ontology proposals with LLM + Wikidata."""
+    from src.ontology.interactive_review import run_interactive_review
+    app_config = load_config()
+    proposal_file = str(_PROJECT_ROOT / ontology_dir / "ontology_proposed.ttl")
+    ontology_file = str(_PROJECT_ROOT / ontology_dir / "ontology.ttl")
+
+    # Build LLM client for placement proposals
+    try:
+        from src.extraction.llm_client import LLMClient
+        llm_client = LLMClient.from_config()
+    except Exception:
+        llm_client = None
+        print("Warning: LLM not available — placement proposals will be limited.")
+
+    run_interactive_review(
+        proposal_file=proposal_file,
+        ontology_file=ontology_file,
+        llm_client=llm_client,
+        wikidata_mode=app_config.ontology.wikidata_mcp,
+    )
+
+
 def approve_ontology(ontology_dir: str = "data/ontology"):
     """Replace ontology.ttl with the reviewed ontology_proposed.ttl."""
     from src.storage.ontology_manager import OntologyManager
@@ -589,7 +635,9 @@ def main():
     # ontology
     ont_p = subparsers.add_parser('ontology', help='Ontology management')
     ont_sub = ont_p.add_subparsers(dest='ont_command')
-    ont_sub.add_parser('approve', help='Approve proposed ontology additions')
+    ont_sub.add_parser('approve', help='Bulk-approve all pending ontology proposals')
+    ont_sub.add_parser('review', help='Interactively review ontology proposals with LLM + Wikidata')
+    ont_sub.add_parser('status', help='Show pending ontology proposals')
 
     # benchmark
     bm_p = subparsers.add_parser('benchmark', help='View pipeline benchmark metrics')
@@ -628,6 +676,10 @@ def main():
     elif args.command == 'ontology':
         if args.ont_command == 'approve':
             approve_ontology()
+        elif args.ont_command == 'status':
+            show_ontology_status()
+        elif args.ont_command == 'review':
+            run_ontology_review()
         else:
             ont_p.print_help()
 

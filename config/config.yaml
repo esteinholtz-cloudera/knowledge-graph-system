@@ -47,6 +47,15 @@ extraction:
   relationship_extraction:
     enabled: true
 
+# Ontology settings
+ontology:
+  # How to reach the Wikidata MCP server for ontology review
+  # subprocess = launch via uvx (no setup needed)
+  # http       = connect to a running HTTP server (future)
+  # disabled   = skip Wikidata lookups
+  wikidata_mcp: subprocess
+  wikidata_mcp_url: null
+
 # Graph Visualisation
 visualization:
   # Path to the ai-knowledge-graph project containing ttl_to_html.py.
