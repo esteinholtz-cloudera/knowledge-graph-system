@@ -821,7 +821,7 @@ def main():
             ont_p.print_help()
 
     elif args.command == 'normalize':
-        if args.norm_command in ('scan', 'apply'):
+        if args.norm_command in ('scan', 'apply', 'review'):
             run_normalize(
                 subcommand=args.norm_command,
                 kg_dir=str(_PROJECT_ROOT / args.kg_dir),
