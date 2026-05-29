@@ -126,7 +126,7 @@ def generate_graph_html(ttl_path: str, graph_html_path: str) -> Optional[str]:
     return graph_html_path
 
 
-def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs", max_chunks: int = None, with_graph: bool = False):
+def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs", max_chunks: int = None, with_graph: bool = False, domain: str = "default"):
     """Process a document and extract knowledge graph."""
     run_start = time.monotonic()
     print(f"Processing document: {file_path}")
@@ -136,11 +136,23 @@ def process_and_extract(file_path: str, output_dir: str = "data/knowledge_graphs
     # Build extractors first so the model name is resolved (auto-detect fires here).
     # The resolved model name is needed to apply per-model config overrides (chunk_size, etc.).
     entity_extractor = EntityExtractor()
-    relationship_extractor = RelationshipExtractor()
     resolved_model = entity_extractor.llm_client._provider.model
 
-    # Apply per-model overrides to get the effective LLM config for this run.
+    # Apply per-model overrides and domain config for this run.
     llm_cfg = app_config.llm.for_model(resolved_model)
+    domain_cfg = app_config.get_domain(domain)
+    if domain != "default":
+        print(f"Domain: {domain}" + (f" — {domain_cfg.description}" if domain_cfg.description else ""))
+
+    entity_extractor = EntityExtractor(
+        llm_client=entity_extractor.llm_client,
+        llm_cfg=llm_cfg,
+        domain=domain_cfg,
+    )
+    relationship_extractor = RelationshipExtractor(
+        llm_cfg=llm_cfg,
+        domain=domain_cfg,
+    )
 
     processor = DocumentProcessor(
         chunk_size=llm_cfg.chunk_size,
@@ -776,6 +788,7 @@ def main():
     p.add_argument('--output-dir', default='data/knowledge_graphs')
     p.add_argument('--max-chunks', type=int, default=None, help='Limit number of chunks processed (for testing)')
     p.add_argument('--with-graph', action='store_true', help='Also generate interactive graph HTML via ai-knowledge-graph/ttl_to_html.py')
+    p.add_argument('--domain', default='default', help='Extraction domain profile: default | technical | literary | scientific (or any name defined in config.yaml domains)')
 
     # server
     s = subparsers.add_parser('server', help='Start n8n API server')
@@ -824,7 +837,7 @@ def main():
     if args.command == 'process':
         if not run_precheck():
             sys.exit(1)
-        result = process_and_extract(args.file_path, args.output_dir, max_chunks=args.max_chunks, with_graph=args.with_graph)
+        result = process_and_extract(args.file_path, args.output_dir, max_chunks=args.max_chunks, with_graph=args.with_graph, domain=args.domain)
         print("\n" + "=" * 50)
         print("Processing complete!")
         print("=" * 50)

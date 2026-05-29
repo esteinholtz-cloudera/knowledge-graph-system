@@ -30,14 +30,24 @@ llm:
   section_size: 5
   # Per-model overrides. Key = model name as reported by the provider.
   # Any field here takes precedence over the defaults above for that model.
+  # Prompt format defaults
+  # low    = "Return ONLY a JSON array" (current default)
+  # medium = adds explicit start/end markers
+  # high   = adds inline example + hard constraint
+  format_strictness: low
+  use_few_shot: false
   model_settings:
     qwen3-30b-a3b-instruct-2507-mlx:
       chunk_size: 300
       section_size: 5
       disable_thinking: true
+      format_strictness: low   # good instruction follower, low is fine
+      use_few_shot: false
     gemma-4-26b-a4b-it-mlx:
       chunk_size: 400
       section_size: 4
+      format_strictness: medium  # tends to add commentary; enforce markers
+      use_few_shot: false
 
 # Storage Configuration
 storage:
@@ -97,3 +107,55 @@ entity_resolution:
   abbreviation_hints: {}
   #  LLM: Large Language Model
   #  RAG: Retrieval-Augmented Generation
+
+# Domain-specific extraction profiles.
+# Use with: python main.py process <file> --domain <name>
+# extra_entity_types and extra_predicates are merged with the base defaults.
+domains:
+  technical:
+    description: "Technical documentation, APIs, software systems"
+    extra_entity_types:
+      - Service
+      - Version
+      - Configuration
+      - Database
+      - API
+      - Error
+      - Module
+    extra_predicates:
+      - deprecates
+      - implements
+      - exposes
+      - dependsOn
+      - isCompatibleWith
+
+  literary:
+    description: "Literature, historical narrative, humanities"
+    extra_entity_types:
+      - Theme
+      - Symbol
+      - CharacterRole
+      - Scene
+    extra_predicates:
+      - loves
+      - betrays
+      - opposes
+      - rules
+      - symbolises
+
+  scientific:
+    description: "Scientific papers, research, biology, medicine"
+    extra_entity_types:
+      - Drug
+      - Disease
+      - Gene
+      - Pathway
+      - Method
+      - Study
+    extra_predicates:
+      - inhibits
+      - activates
+      - correlatesWith
+      - causedBy
+      - treatedBy
+      - expressedIn
