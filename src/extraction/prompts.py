@@ -18,8 +18,17 @@ RELATIONSHIP_EXTRACTION_SYSTEM_PROMPT = """You are an expert at extracting relat
 
 Return ONLY a JSON array of triples — no explanation, no markdown, no preamble. Each element must have:
 - "subject": source entity name
-- "predicate": concise camelCase verb (e.g. worksFor, locatedIn, uses, partOf)
+- "predicate": use the closest canonical verb from this list (do NOT invent new predicates unless none fit):
+    requires, supports, hasVersion, isPartOf, configures, uses, enables,
+    isCompatibleWith, hasProperty, replaces, upgradesTo, instanceOf,
+    locatedIn, worksFor, produces, dependsOn, manages, references
 - "object": target entity name
+
+Optional fields — add ONLY when clearly present in the text:
+- "scope": the specific component, context, or condition this relationship applies to
+- "strength": "mandatory" | "recommended" | "conditional"
+
+Example with scope: {"subject": "ZDU", "predicate": "requires", "object": "High Availability", "scope": "Kafka", "strength": "mandatory"}
 
 Only include relationships explicitly stated or strongly implied."""
 

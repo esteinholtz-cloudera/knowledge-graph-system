@@ -665,6 +665,36 @@ def run_ontology_review(ontology_dir: str = "data/ontology"):
     )
 
 
+def _regenerate_graphs(kg_dir: str):
+    """Regenerate graph HTML for every TTL file in kg_dir that has a matching HTML file."""
+    docs_dir = _PROJECT_ROOT / "data" / "documents"
+    rewritten = 0
+    for ttl in sorted(Path(kg_dir).glob("*.ttl")):
+        stem = ttl.stem
+        html_path = docs_dir / f"{stem}_graph.html"
+        if not html_path.exists():
+            continue
+        print(f"  Regenerating {html_path.name}...")
+        result = generate_graph_html(str(ttl), str(html_path))
+        if result:
+            rewritten += 1
+    if rewritten:
+        print(f"  Regenerated {rewritten} graph HTML file(s)")
+    else:
+        print("  No existing graph HTML files to regenerate (use --with-graph on next process run)")
+
+
+def visualize_ontology(ontology_dir: str = "data/ontology"):
+    """Generate an interactive graph HTML of the ontology class hierarchy."""
+    ontology_file = _PROJECT_ROOT / ontology_dir / "ontology.ttl"
+    if not ontology_file.exists():
+        print("ontology.ttl not found.")
+        return
+    output_path = _PROJECT_ROOT / "data" / "documents" / "ontology_graph.html"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    generate_graph_html(str(ontology_file), str(output_path))
+
+
 def approve_ontology(ontology_dir: str = "data/ontology"):
     """Replace ontology.ttl with the reviewed ontology_proposed.ttl."""
     from src.storage.ontology_manager import OntologyManager
@@ -675,6 +705,62 @@ def approve_ontology(ontology_dir: str = "data/ontology"):
         print("No proposed ontology file found. Nothing to approve.")
     else:
         print(f"Approved {n} new class(es). ontology.ttl updated.")
+
+
+def run_normalize(subcommand: str, kg_dir: str, ontology_file: str,
+                  map_file: str, dry_run: bool, no_llm: bool):
+    """Predicate normalization: scan predicates, review map, apply rewrites."""
+    from src.normalization.predicate_normalizer import build_predicate_map, apply_predicate_map
+    from src.normalization._review import interactive_review
+    import yaml
+
+    map_path = Path(map_file)
+
+    if subcommand == "scan":
+        print(f"Scanning {kg_dir} for predicates...")
+        llm_client = None
+        if not no_llm:
+            try:
+                from src.extraction.llm_client import LLMClient
+                llm_client = LLMClient.from_config()
+                print("  LLM available — will suggest canonical mappings")
+            except Exception:
+                print("  LLM unavailable — using string similarity only")
+        mapping = build_predicate_map(kg_dir, llm_client=llm_client)
+        n_groups = len(mapping["mappings"])
+        n_review = sum(1 for m in mapping["mappings"] if len(m["variants"]) > 1)
+        map_path.parent.mkdir(parents=True, exist_ok=True)
+        map_path.write_text(yaml.dump(mapping, allow_unicode=True, sort_keys=False))
+        print(f"\n  {n_groups} predicate groups found, {n_review} with variants to review")
+        print(f"  Written to: {map_path}")
+        print(f"\nNext: review {map_path}, set 'reviewed: true', then run normalize apply")
+
+    elif subcommand == "apply":
+        if not map_path.exists():
+            print(f"No predicate map at {map_path}. Run 'normalize scan' first.")
+            return
+        mapping = yaml.safe_load(map_path.read_text())
+        reviewed = [m for m in mapping.get("mappings", []) if m.get("reviewed")]
+        if not reviewed:
+            print("No mappings marked 'reviewed: true'. Edit the map file first.")
+            return
+        if dry_run:
+            print("Dry run — showing changes without writing files:")
+        files, triples = apply_predicate_map(
+            kg_dir=kg_dir,
+            ontology_file=ontology_file,
+            predicate_map={"mappings": reviewed},
+            dry_run=dry_run,
+        )
+        print(f"  {'Would rewrite' if dry_run else 'Rewrote'} {triples} triple(s) in {files} file(s)")
+        if not dry_run:
+            print(f"  owl:subPropertyOf declarations added to {ontology_file}")
+            if files:
+                _regenerate_graphs(kg_dir)
+    elif subcommand == "review":
+        interactive_review(map_file)
+    else:
+        print("Usage: python main.py normalize scan|review|apply [--dry-run] [--no-llm]")
 
 
 def main():
@@ -708,6 +794,20 @@ def main():
     ont_sub.add_parser('approve', help='Bulk-approve all pending ontology proposals')
     ont_sub.add_parser('review', help='Interactively review ontology proposals with LLM + Wikidata')
     ont_sub.add_parser('status', help='Show pending ontology proposals')
+    ont_sub.add_parser('visualize', help='Generate interactive graph HTML of the ontology class hierarchy')
+
+    # normalize
+    norm_p = subparsers.add_parser('normalize', help='Predicate normalization: cluster ad-hoc predicates and rewrite TTL files')
+    norm_sub = norm_p.add_subparsers(dest='norm_command')
+    norm_scan = norm_sub.add_parser('scan', help='Scan TTL files and write predicate_map.yaml')
+    norm_scan.add_argument('--no-llm', action='store_true', help='Skip LLM suggestions, use string similarity only')
+    norm_review = norm_sub.add_parser('review', help='Interactively review predicate_map.yaml one mapping at a time')
+    norm_apply = norm_sub.add_parser('apply', help='Apply reviewed predicate_map.yaml to TTL files')
+    norm_apply.add_argument('--dry-run', action='store_true', help='Show changes without writing files')
+    for p_ in (norm_scan, norm_review, norm_apply):
+        p_.add_argument('--kg-dir', default='data/knowledge_graphs')
+        p_.add_argument('--ontology-file', default='data/ontology/ontology.ttl')
+        p_.add_argument('--map-file', default='data/predicate_map.yaml')
 
     # benchmark
     bm_p = subparsers.add_parser('benchmark', help='View pipeline benchmark metrics')
@@ -750,8 +850,23 @@ def main():
             show_ontology_status()
         elif args.ont_command == 'review':
             run_ontology_review()
+        elif args.ont_command == 'visualize':
+            visualize_ontology()
         else:
             ont_p.print_help()
+
+    elif args.command == 'normalize':
+        if args.norm_command in ('scan', 'apply', 'review'):
+            run_normalize(
+                subcommand=args.norm_command,
+                kg_dir=str(_PROJECT_ROOT / args.kg_dir),
+                ontology_file=str(_PROJECT_ROOT / args.ontology_file),
+                map_file=str(_PROJECT_ROOT / args.map_file),
+                dry_run=getattr(args, 'dry_run', False),
+                no_llm=getattr(args, 'no_llm', False),
+            )
+        else:
+            norm_p.print_help()
 
     elif args.command == 'benchmark':
         if args.bm_command == 'show':

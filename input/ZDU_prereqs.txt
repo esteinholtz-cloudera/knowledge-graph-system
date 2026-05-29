@@ -1,0 +1,179 @@
+Software Requirements
+Review the software requirements to understand the minimum supported versions for upgrading Cloudera Manager and Cloudera Runtime cluster.
+
+Source cluster must be running Cloudera Runtime 7.1.7 or Cloudera Runtime 7.1.8 with the latest CHF or Service Pack. However, Cloudera recommends your cluster must be on a version higher than Cloudera Runtime 7.1.7 SP2 or Cloudera Runtime 7.1.8 with the latest CHF.
+Source cluster must be running Cloudera Runtime 7.1.7 SP3 or CDP 7.1.8 cumulative hotfix 17 or 7.1.9 SP1 or 7.1.9 to upgrade to Cloudera Base on premises 7.3.1.
+Source cluster must be running Cloudera Manager version 7.6.1 and higher.
+All active services must have the required prerequisites (for example, high-availability) setup before starting the process.
+For more information on the supported upgrade paths, see the Supported in-place upgrade paths documentation.
+Parent topic: Getting started with Zero Downtime Upgrade (ZDU)
+Configuring components before starting ZDU
+You must review and perform the prerequisite tasks related to service components before performing the ZDU upgrade. These tasks help you to prepare your components for the ZDU upgrade process.
+
+Atlas - update Solr replication factor
+In Solr, before upgrading, when you set the replication factor to 2, it implies 1 leader replica and 1 follower replica are available in each of the nodes. Later, when performing rolling upgrade/restart, you still have a follower replica in a node which can be used to serve Atlas without any downtime from the client (Atlas). Restart Atlas for the changes to take effect.
+
+If you already have:
+Cloudera Runtime 7.1.9 installation and plan to upgrade with Zero Downtime Upgrade process and with replication factor set to 1, perform the following steps; however, performing these steps can lead to data loss:
+Stop the Atlas service.
+Delete the Solr collections manually. For more information, see Managing collections in Search.
+Set the replication factor to the number of available Solr brokers / instances.
+Restart Atlas.
+Check that the Solr collections are created with replication factor as set in Atlas.
+If you are performing a fresh Cloudera Runtime 7.1.9 installation, then set the replication factor to number of available Solr broker / instance and continue with Atlas installation.
+Atlas - update Kafka replication factor to the number of available Kafka brokers
+You must perform certain prerequisite tasks based on whether Kafka topics are available and Atlas is installed on your cluster.
+
+When Kafka topics are available, use the following procedure.
+
+Stop the Atlas service.
+Delete the topics (ATLAS_HOOK, ATLAS_ENTITIES, and ATLAS_SPARK_HOOK) manually. For more information, see Monitoring Kafka topics and Deleting a Kafka topic.
+Set the replication factor to the number of available Kafka brokers in Kafka.
+Restart Kafka.
+Restart Atlas.
+Check that the topics are created with a replication factor as set in Kafka.
+When Kafka topics are not available, use the following procedure:
+Set the replication factor to the number of available Kafka brokers in Kafka.
+Restart Kafka.
+Click Action > Create Kafka topics for Atlas in Atlas service.
+Check that the topics are created with the replication factor as set in Kafka.
+When Atlas is not installed on your cluster, use the following procedure:
+Set replication factor to the number of available Kafka brokers in Kafka, Restart Kafka.
+Install the Atlas service.
+Check that the topics are created with the replication factor as set in Kafka.
+In your Kafka environment, go to Actions > Create Kafka topics for Atlas.
+Data Analytics Studio (Deprecated)
+Data Analytics Studio (DAS) has been deprecated in 7.1.9 and is no longer available with Cloudera. Hue now replaces DAS. Before you upgrade, you must remove the DAS service from your cluster.
+Log in to Cloudera Manager as an Administrator.
+Go to Clusters > DAS service and click Actions > Stop.
+Click Actions > Delete.
+Cloudera recommends that you delete the DAS database to free up resources.
+
+HDFS
+You must ensure that the High Availability mode is enabled and more than one HDFS NameNode is running.
+
+HMS
+You must enable High Availability for Hive Metastore (HMS) and ensure that more than one instance of HMS is running. For details, see Configuring HMS for high availability.
+
+Hive on Tez
+You must enable High Availability for HiveServer (HS2) and ensure that more than one instance of HS2 is running. For details, see Configuring HiveServer high availability using ZooKeeper.
+important
+During a HS2 restart, any running queries are aborted and will have to be manually resubmitted. Therefore, it is recommended that you do not submit new queries until all the HS2 instances are restarted.
+You can use the graceful shutdown feature of HS2, which ensures that HS2 waits for a specified time period before shutting down, thereby allowing queries that are already running to complete before HS2 stops. However, this feature is available from Cloudera Runtime 7.1.9 onwards and can only be used for Cloudera Runtime upgrades from 7.1.9 to higher versions.
+
+Hue
+You must enable High Availability for Hue to leverage cluster-level rolling restart. See Configuring high availability for Hue.
+You must run yum install gcc openssl-devel bzip2-devel libffi-devel zlib-devel along with python 3.8 command before starting the upgrade.
+You must install dependencies by running the following command along with Python 3.8 command before starting the upgrade:
+yum install gcc openssl-devel bzip2-devel libffi-devel zlib-devel
+You must install psycopg2-binary before starting the upgrade if you are using Postgres. See Installing the psycopg2 Python package for PostgreSQL database.
+Impala
+You must enable High Availability (HA) for Impala Catalog server and StateStore server by configuring more than one Impala Catalog server and one StateStore server instance on different nodes. For details, seeConfiguring Impala for High Availability
+
+Consideration for ZDU implementation:
+Ensure that High Availability is enabled for both the Catalog and StateStore. There might be a brief window of downtime during Catalog or StateStore failover. For details see:Failure detection for Catalog and StateStore
+Ensure at least two coordinators behind a load balancer. The batch rolling upgrade count for workers should be less than the number of coordinators.
+ZDU works effectively when the Catalog or StateStore protocol versions remain unchanged.
+Kafka
+The Kafka service in Cloudera consists of multiple service role types. Each role type represents core features in Kafka. The following collects the ZDU prerequisites for each role type. You must ensure that these prerequisites are met to ensure that the service can be upgraded with zero downtime.
+
+Although the Kafka service supports ZDU if the following prerequisites are met, Kafka service monitoring provided by SMM is briefly interrupted during the upgrade because SMM does not support ZDU.
+
+Kafka Broker
+Ensure that your Kafka Broker roles are running in HA mode. That is, you have more than a single Kafka Broker role deployed in the cluster. Cloudera recommends a minimum of 3.
+Ensure that replication.factor is set to at least 3 and min.insync.replicas is set to at least 2 for all mission critical topics. Additionally, note the following about these configuration values:
+The value set for min.insync.replicas must always be at least 1 less than replication.factor.
+Topics with replication.factor=2 or min.insync.replicas=1 are not considered highly available.
+Topics with replication.factor=1 become unavailable when the broker hosting the topic goes temporarily offline during the upgrade.
+Ensure that the upgrade Batch Size is set to 1.
+
+Batch Size is the number of roles that are restarted simultaneously during the upgrade. Batch Size is configured during the Choose Upgrade Procedure step of the Upgrade Wizard. If Batch Size is set to a value greater than 1, Kafka Broker roles hosting the replicas of the same topic might go down simultaneously. This results in the topic becoming temporarily unavailable.
+Ensure that the Cluster Health Guarantee During Rolling Restart Kafka property is set to a value that fits your requirements. For more information, see Rolling restart checks.
+If your cluster uses Cruise Control and self-healing is enabled, ensure that the time set in broker.failure.self.healing.threshold.ms is higher than the expected downtime of the brokers.This property controls the time a broker can be offline before Cruise Control starts the self-healing process. If the property is set to a low value, you risk triggering self-healing during an upgrade.The property is set to 1,800,000 ms (30 minutes) by default, which should be viable for most deployments. If you configured this property and set a custom threshold value, ensure that the value you configured is sufficiently high. If you are unsure, you can either revert to the default value, or temporarily disable Cruise Control for the duration of the upgrade. You can set the property in Cloudera Manager with Cruise Control Server Advanced Configuration Snippet (Safety Valve) for cruisecontrol.properties. Restart the Cruise Control service if you make changes to the property.
+Kafka Connect
+
+Ensure that your Kafka Connect roles are running in HA mode. That is, you have more than a single Kafka Connect role deployed in the cluster. Cloudera recommends a minimum of 3.
+If you have external clients that connect to the Kafka Connect REST API, ensure that you are using a load balancer to redirect REST API calls. If you do not have a load balancer, expect service downtime as Kafka Connect provides no automatic failover between its REST endpoints.
+MirrorMaker
+
+Ensure that your MirrorMaker roles are running in HA mode. That is, you have more than a single MirrorMaker role deployed in the cluster. Cloudera recommends a minimum of 3.
+
+Key Trustee Server
+Back up Key Trustee Server manually on both Active and Passive hosts
+Back up the Key Trustee Server configuration directory on both Active and Passive hosts
+Move the .backup files (keytrustee-db.zip and keytrustee-conf.zip) to a secure location on both Active and Passive hosts.
+Kudu
+Ensure that the High Aavailability mode is enabled and at least three Kudu master servers and three tablet servers are running and all the tables have a replication factor of three or more.
+
+Livy
+Ensure that the HA mode is enabled and more than one Livy Server is running.
+Ensure that the Livy service supports the rolling restart functionality in Cloudera Manager.
+Omid
+Ensure that the HA mode is enabled and more than one OMID TSO server is running.
+Ensure that the OMID service supports the rolling restart functionality.
+Ensure that the Enable HA for Omid TSO server option is selected under Configurations in Cloudera Manager.
+Phoenix
+Ensure that the HA mode is enabled and more than one PQS server is running.
+Ensure that the Phoenix service supports the rolling restart functionality.
+Ranger KMS
+Before Ranger KMS KTS upgrade, perform the Key Trustee Server prerequisite tasks, and then back up Ranger KMS KTS by going to Cloudera Manager > Ranger KMS KTS > Actions > Create Backup.
+Before upgrading Ranger KMS DB, back up Ranger and Ranger KMS DB.
+
+Schema Registry
+When upgrading from Cloudera Runtime 7.1.8 to 7.1.9 or higher, if you only have external clients connecting to the server, you can ensure zero downtime if you upgrade your external clients before upgrading the cluster. The actions you must take differ depending on the type client you are using:
+
+If you are using a generic HTTP client, ensure that retry and failover is implemented in the client code.
+If you are using the Cloudera distributed Schema Registry Java client, ensure that you upgrade your applications that use the client before you upgrade the cluster. You can access the latest version of the client in the Cloudera Manager Maven repository at https://repository.cloudera.com/artifactory/cloudera-repos/. Alternatively, you can choose to implement retry and failover yourself. The following code snippet is an example of the configuration that is required.
+Map<String, Object> retryParams = new HashMap<>();
+     		retryParams.put("sleepTimeMs", SLEEP_TIME);
+     		retryParams.put("maxAttempts", MAX_ATTEMPTS);
+     		retryParams.put("timeoutMs", OVERALL_TIMEOUT);
+
+        	Map<String, Object> retryConfig = new HashMap<>();
+        	retryConfig.put("className", "com.hortonworks.registries.schemaregistry.retry.policy.ExponentialBackoffPolicy");
+        	retryConfig.put("config", retryParams);
+		
+		Map<String, ?> clientConfig = new HashMap<>();
+		clientConfig.put("schema.registry.url", "url1,url2")
+        	clientConfig.put("schema.registry.client.retry.policy", retryConfig);
+		clientConfig.put(...); // other client configuration
+        	SchemaRegistryClient client = new SchemaRegistryClient(clientConfig);
+Solr
+When upgrading from Cloudera Runtime 7.1.9 or higher, you can ensure zero downtime by meeting the following prerequisites for your Solr services before initiating an upgrade with rolling restart:
+
+The Solr service must have more than one server to perform a rolling restart. Otherwise the service will not be available during the restart.
+
+You are highly recommended to change the workload Solr collections to read-only before performing a rolling restart. Revert this setting after the upgrade is finished.
+
+Ensure you have replication factor set to greater than one for all workload Solr collections. If this criteria is not met, your queries may fail at the time of upgrade and your application may have to re-send the queries once the upgrade is successful.
+SRM
+The Streams Replication Manager (SRM) service in Cloudera consists of multiple service role types. Each role type represents core features in SRM. You must ensure that these prerequisites are met to ensure that the service can be upgraded with zero downtime.
+
+Although the SRM service supports ZDU if the following prerequisites are met, replication monitoring provided by SMM is briefly interrupted during the upgrade because SMM does not support ZDU.
+
+SRM Driver
+
+Ensure that your SRM Driver roles are running in HA mode. That is, you have more than a single SRM Driver role deployed in the cluster. Cloudera recommends a minimum of 3.
+
+SRM Service
+Ensure that your SRM Service roles are running in HA mode. That is, you have more than a single SRM Service role deployed in the cluster. Cloudera recommends a minimum of 3.
+If you have external clients that connect to the SRM Service REST API, ensure that you are using a load balancer to redirect REST API calls. If you do not have a load balancer, expect some service downtime as the SRM Service provides no automatic failover between its REST endpoints.
+If you are upgrading from Cloudera Runtime 7.1.8 or lower to Cloudera Runtime 7.1.9 or higher, you must enable the migration of metrics before you upgrade. Although SRM does not experience service downtime if metrics are not migrated, aggregated metrics collected before the upgrade are lost. As a result, an SRM upgrade without metric migration does not guarantee complete zero downtime. For more information, see Step 1: Getting Started Upgrading a Cluster.
+YARN
+ResourceManager Work Preserving Recovery
+
+YARN work preserving recovery must be enabled. Ensure that the Services > YARN > Configs > Advanced property yarn.resourcemanager.work-preserving-recovery.enabled property is set to true.
+
+ResourceManager HA
+
+ResourceManager HA should be enabled to prevent a disruption in service during the upgrade.
+
+This prerequisite is OPTIONAL
+Upgrade from Cloudera Runtime 7.1.8 or 7.1.9 or 7.1.9 SP1 to Cloudera Base on premises 7.3.1
+For security reasons, Cloudera Base on premises 7.3.1. has the mapreduce.shuffle.ssl.enabled option turned on. If this option is not set to true before the upgrade, already running MR2 applications fail during the upgrade in the shuffle phase with the java.io.IOException: Exceeded MAX_FAILED_UNIQUE_FETCHES; bailing-out exception.
+When no MR2 jobs are running, configure the mapreduce.shuffle.ssl.enabled option to true before the upgrade. Restart the YARN service and deploy the client configurations.
+Upgrade from Cloudera Runtime 7.1.8 to Cloudera Runtime 7.1.9 or 7.1.9 SP1
+Upgrading from Cloudera Runtime 7.1.8 to Cloudera Runtime 7.1.9 or 7.1.9 SP1 displays the error TestDFSIO intermittently failing with the RuntimeException: native snappy library not available.
+You must retry the job.
+Check and enable High Availability service for your components
+You must check and enable the High Availability support for your service component before you proceed with the upgrade process. High Availability is required to perform the ZDU process.
