@@ -665,6 +665,38 @@ def run_ontology_review(ontology_dir: str = "data/ontology"):
     )
 
 
+def _regenerate_graphs(kg_dir: str):
+    """Regenerate graph HTML for every TTL file in kg_dir that has a matching HTML file."""
+    docs_dir = _PROJECT_ROOT / "data" / "documents"
+    rewritten = 0
+    for ttl in sorted(Path(kg_dir).glob("*.ttl")):
+        stem = ttl.stem
+        html_path = docs_dir / f"{stem}_graph.html"
+        if not html_path.exists():
+            continue
+        print(f"  Regenerating {html_path.name}...")
+        result = generate_graph_html(str(ttl), str(html_path))
+        if result:
+            rewritten += 1
+    if rewritten:
+        print(f"  Regenerated {rewritten} graph HTML file(s)")
+    else:
+        print("  No existing graph HTML files to regenerate (use --with-graph on next process run)")
+
+
+def visualize_ontology(ontology_dir: str = "data/ontology"):
+    """Generate an interactive graph HTML of the ontology class hierarchy."""
+    ontology_file = _PROJECT_ROOT / ontology_dir / "ontology.ttl"
+    if not ontology_file.exists():
+        print("ontology.ttl not found.")
+        return
+    output_path = _PROJECT_ROOT / "data" / "documents" / "ontology_graph.html"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    result = generate_graph_html(str(ontology_file), str(output_path))
+    if result:
+        print(f"Ontology graph saved to: {result}")
+
+
 def approve_ontology(ontology_dir: str = "data/ontology"):
     """Replace ontology.ttl with the reviewed ontology_proposed.ttl."""
     from src.storage.ontology_manager import OntologyManager
@@ -725,6 +757,8 @@ def run_normalize(subcommand: str, kg_dir: str, ontology_file: str,
         print(f"  {'Would rewrite' if dry_run else 'Rewrote'} {triples} triple(s) in {files} file(s)")
         if not dry_run:
             print(f"  owl:subPropertyOf declarations added to {ontology_file}")
+            if files:
+                _regenerate_graphs(kg_dir)
     elif subcommand == "review":
         interactive_review(map_file)
     else:
@@ -762,6 +796,7 @@ def main():
     ont_sub.add_parser('approve', help='Bulk-approve all pending ontology proposals')
     ont_sub.add_parser('review', help='Interactively review ontology proposals with LLM + Wikidata')
     ont_sub.add_parser('status', help='Show pending ontology proposals')
+    ont_sub.add_parser('visualize', help='Generate interactive graph HTML of the ontology class hierarchy')
 
     # normalize
     norm_p = subparsers.add_parser('normalize', help='Predicate normalization: cluster ad-hoc predicates and rewrite TTL files')
@@ -817,6 +852,8 @@ def main():
             show_ontology_status()
         elif args.ont_command == 'review':
             run_ontology_review()
+        elif args.ont_command == 'visualize':
+            visualize_ontology()
         else:
             ont_p.print_help()
 
