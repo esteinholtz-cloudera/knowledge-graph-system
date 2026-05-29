@@ -692,9 +692,7 @@ def visualize_ontology(ontology_dir: str = "data/ontology"):
         return
     output_path = _PROJECT_ROOT / "data" / "documents" / "ontology_graph.html"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    result = generate_graph_html(str(ontology_file), str(output_path))
-    if result:
-        print(f"Ontology graph saved to: {result}")
+    generate_graph_html(str(ontology_file), str(output_path))
 
 
 def approve_ontology(ontology_dir: str = "data/ontology"):
