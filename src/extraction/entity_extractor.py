@@ -1,10 +1,14 @@
 """Entity extraction from text using LLM."""
 import logging
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from .json_utils import extract_json
 from .llm_client import LLMClient
+from .prompt_builder import build_entity_prompts
 from .prompts import ENTITY_EXTRACTION_SYSTEM_PROMPT, ENTITY_EXTRACTION_USER_PROMPT
+
+if TYPE_CHECKING:
+    from ..config.settings import DomainSettings, LLMSettings
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +20,15 @@ class ExtractionError(RuntimeError):
 class EntityExtractor:
     """Extract entities from text using LLM."""
 
-    def __init__(self, llm_client: Optional[LLMClient] = None):
+    def __init__(
+        self,
+        llm_client: Optional[LLMClient] = None,
+        llm_cfg: Optional["LLMSettings"] = None,
+        domain: Optional["DomainSettings"] = None,
+    ):
         self.llm_client = llm_client or LLMClient.from_config()
+        self._llm_cfg = llm_cfg
+        self._domain = domain
 
     def extract(self, text: str, progress_label: Optional[str] = None) -> List[Dict]:
         """
@@ -26,11 +37,16 @@ class EntityExtractor:
         Returns:
             List of dicts with 'entity', 'type', and optionally 'context'.
         """
-        user_prompt = ENTITY_EXTRACTION_USER_PROMPT.format(text=text)
+        if self._llm_cfg and self._domain:
+            system_prompt, user_template = build_entity_prompts(self._llm_cfg, self._domain)
+            user_prompt = user_template.format(text=text)
+        else:
+            system_prompt = ENTITY_EXTRACTION_SYSTEM_PROMPT
+            user_prompt = ENTITY_EXTRACTION_USER_PROMPT.format(text=text)
 
         response = self.llm_client.generate(
             prompt=user_prompt,
-            system_prompt=ENTITY_EXTRACTION_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             stop_words=None,
             max_new_tokens=1024,
             temperature=0.3,
