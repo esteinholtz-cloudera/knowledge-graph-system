@@ -1,9 +1,10 @@
 """Relationship extraction from text using LLM."""
 import logging
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from .json_utils import extract_json
 from .llm_client import LLMClient
+from .prompt_builder import build_relationship_prompts
 from .prompts import (
     COMBINED_EXTRACTION_SYSTEM_PROMPT,
     COMBINED_EXTRACTION_USER_PROMPT,
@@ -11,14 +12,24 @@ from .prompts import (
     RELATIONSHIP_EXTRACTION_USER_PROMPT,
 )
 
+if TYPE_CHECKING:
+    from ..config.settings import DomainSettings, LLMSettings
+
 logger = logging.getLogger(__name__)
 
 
 class RelationshipExtractor:
     """Extract relationships between entities using LLM."""
 
-    def __init__(self, llm_client: Optional[LLMClient] = None):
+    def __init__(
+        self,
+        llm_client: Optional[LLMClient] = None,
+        llm_cfg: Optional["LLMSettings"] = None,
+        domain: Optional["DomainSettings"] = None,
+    ):
         self.llm_client = llm_client or LLMClient.from_config()
+        self._llm_cfg = llm_cfg
+        self._domain = domain
 
     def extract(
         self,
@@ -34,12 +45,17 @@ class RelationshipExtractor:
         """
         if entities:
             entity_list = ", ".join(entities[:20])
-            user_prompt = RELATIONSHIP_EXTRACTION_USER_PROMPT.format(
-                text=text, entities=entity_list
-            )
+            if self._llm_cfg and self._domain:
+                system_prompt, user_template = build_relationship_prompts(self._llm_cfg, self._domain)
+                user_prompt = user_template.format(text=text, entities=entity_list)
+            else:
+                system_prompt = RELATIONSHIP_EXTRACTION_SYSTEM_PROMPT
+                user_prompt = RELATIONSHIP_EXTRACTION_USER_PROMPT.format(
+                    text=text, entities=entity_list
+                )
             response = self.llm_client.generate(
                 prompt=user_prompt,
-                system_prompt=RELATIONSHIP_EXTRACTION_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 stop_words=None,
                 max_new_tokens=2048,
                 temperature=0.3,

@@ -34,6 +34,23 @@ class ModelOverrides(BaseModel):
     disable_thinking: Optional[bool] = None
     temperature: Optional[float] = None
     max_new_tokens: Optional[int] = None
+    # Prompt format knobs — how strictly to enforce JSON-only output.
+    # low    = current default ("Return ONLY a JSON array")
+    # medium = adds explicit start/end markers
+    # high   = adds inline example + hard constraint (for weaker instruction followers)
+    format_strictness: Optional[Literal["low", "medium", "high"]] = None
+    # Whether to prepend a few-shot example to the user prompt.
+    # Helps smaller models that struggle with the output schema.
+    use_few_shot: Optional[bool] = None
+
+
+class DomainSettings(BaseModel):
+    """Per-domain extraction configuration.
+    Extra entity types and predicates are merged with the global defaults.
+    """
+    description: str = ""
+    extra_entity_types: List[str] = Field(default_factory=list)
+    extra_predicates: List[str] = Field(default_factory=list)
 
 DEFAULT_BASE_URLS = {
     "ollama": "http://localhost:11434/v1",
@@ -66,6 +83,9 @@ class LLMSettings(BaseModel):
     # Number of consecutive chunks to group into one section for Pass 2b
     # cross-section relationship extraction. 0 or 1 disables the section pass.
     section_size: int = 5
+    # Prompt format defaults (overridable per model)
+    format_strictness: Literal["low", "medium", "high"] = "low"
+    use_few_shot: bool = False
     # Per-model overrides keyed by the model name as reported by the provider.
     # Any field set here takes precedence over the defaults above for that model.
     model_settings: Dict[str, ModelOverrides] = Field(default_factory=dict)
@@ -170,6 +190,11 @@ class AppSettings(BaseModel):
     entity_resolution: EntityResolutionSettings = Field(default_factory=EntityResolutionSettings)
     ontology: OntologySettings = Field(default_factory=OntologySettings)
     visualization: VisualizationSettings = Field(default_factory=VisualizationSettings)
+    domains: Dict[str, DomainSettings] = Field(default_factory=dict)
+
+    def get_domain(self, name: str) -> DomainSettings:
+        """Return domain settings by name, or empty defaults if unknown."""
+        return self.domains.get(name, DomainSettings())
 
 
 def load_config(config_path: Optional[str] = None) -> AppSettings:
