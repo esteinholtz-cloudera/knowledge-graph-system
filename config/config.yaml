@@ -16,7 +16,7 @@ llm:
   api_key_env: null
   timeout_seconds: 300
   temperature: 0.3
-  max_new_tokens: 16000
+  max_new_tokens: 32000
   # Prepend /no_think to disable extended reasoning on thinking models (qwen3, etc.)
   # Prevents token exhaustion before the JSON answer is emitted.
   disable_thinking: true
@@ -48,6 +48,11 @@ llm:
       section_size: 4
       format_strictness: medium  # tends to add commentary; enforce markers
       use_few_shot: false
+
+# Pipeline orchestration
+pipeline:
+  # Parallel LLM calls per chunk batch. Use 1 for local Ollama/LM Studio.
+  max_concurrent_llm_calls: 1
 
 # Storage Configuration
 storage:

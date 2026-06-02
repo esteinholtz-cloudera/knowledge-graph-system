@@ -25,6 +25,8 @@ REVIEW_STATUS = ONT_META.reviewStatus
 PROPOSED_BY = ONT_META.proposedBy
 SOURCE_TTL = ONT_META.sourceTTL        # for entity re-typing proposals
 ENTITY_LABEL = ONT_META.entityLabel    # human-readable label of the entity needing typing
+SUB_TAXONOMY_ID = ONT_META.subTaxonomyId
+LEAF_CLASS_URI = ONT_META.leafClassUri
 
 STATUS_PENDING = Literal("pending")
 STATUS_APPROVED = Literal("approved")
@@ -147,6 +149,8 @@ class ProposalStore:
         if proposed_by:
             g.add((uri, PROPOSED_BY, Literal(proposed_by)))
         g.set((uri, REVIEW_STATUS, Literal(status)))
+        import uuid as _uuid
+        g.set((uri, SUB_TAXONOMY_ID, Literal(str(_uuid.uuid4()))))
         return uri
 
     def set_subclass_of(self, class_uri: str, parent_uri: str):
@@ -157,12 +161,60 @@ class ProposalStore:
             self._graph.remove(triple)
         self._graph.add((uri, RDFS.subClassOf, URIRef(parent_uri)))
 
+    def add_subclass_of(self, class_uri: str, parent_uri: str, source: str = "manual"):
+        """Add rdfs:subClassOf without removing existing parents (multiple inheritance)."""
+        child = URIRef(class_uri)
+        parent = URIRef(parent_uri)
+        if (child, RDFS.subClassOf, parent) not in self._graph:
+            self._graph.add((child, RDFS.subClassOf, parent))
+        if source:
+            self._graph.add((child, ONT_META.subclassLinkSource, Literal(f"{parent_uri}|{source}")))
+
     def set_equivalent_class(self, class_uri: str, equiv_uri: str):
         """Add owl:equivalentClass (Wikidata alignment)."""
         self._graph.add((URIRef(class_uri), OWL.equivalentClass, URIRef(equiv_uri)))
 
     def set_status(self, class_uri: str, status: str):
         self._graph.set((URIRef(class_uri), REVIEW_STATUS, Literal(status)))
+
+    def get_sub_taxonomy_id(self, subject: str) -> Optional[str]:
+        val = next(self._graph.objects(URIRef(subject), SUB_TAXONOMY_ID), None)
+        return str(val) if val else None
+
+    def set_sub_taxonomy_id(self, subject: str, proposal_id: str) -> None:
+        self._graph.set((URIRef(subject), SUB_TAXONOMY_ID, Literal(proposal_id)))
+
+    def get_leaf_class_uri(self, subject: str) -> Optional[str]:
+        val = next(self._graph.objects(URIRef(subject), LEAF_CLASS_URI), None)
+        return str(val) if val else None
+
+    def set_leaf_class_uri(self, subject: str, class_uri: str) -> None:
+        self._graph.set((URIRef(subject), LEAF_CLASS_URI, URIRef(class_uri)))
+
+    def get_retype_node_for_bundle(self, proposal_id: str) -> Optional[str]:
+        for subj, _, obj in self._graph.triples((None, SUB_TAXONOMY_ID, Literal(proposal_id))):
+            if str(subj).startswith("http://example.org/ontology/meta/retype/"):
+                return str(subj)
+        return None
+
+    def subjects_for_sub_taxonomy(self, proposal_id: str) -> List[str]:
+        return [
+            str(subj)
+            for subj, _, obj in self._graph.triples((None, SUB_TAXONOMY_ID, Literal(proposal_id)))
+        ]
+
+    def reject_bundle(self, proposal_id: str) -> int:
+        """Mark all classes and retype nodes in a bundle as rejected."""
+        count = 0
+        for subject in self.subjects_for_sub_taxonomy(proposal_id):
+            self._graph.set((URIRef(subject), REVIEW_STATUS, STATUS_REJECTED))
+            count += 1
+        return count
+
+    def remove_retype_node(self, node_uri: str) -> None:
+        node = URIRef(node_uri)
+        for triple in list(self._graph.triples((node, None, None))):
+            self._graph.remove(triple)
 
     def save(self):
         """Serialise the proposal graph to the proposal file."""
@@ -257,6 +309,8 @@ class ProposalStore:
         g.add((node, SOURCE_TTL, Literal(source_ttl)))
         if proposed_by:
             g.add((node, PROPOSED_BY, Literal(proposed_by)))
+        import uuid as _uuid
+        g.set((node, SUB_TAXONOMY_ID, Literal(str(_uuid.uuid4()))))
 
     def get_needs_typing(self) -> List[Dict]:
         """Return entities flagged as needing a better type."""

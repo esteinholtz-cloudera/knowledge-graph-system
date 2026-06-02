@@ -51,6 +51,10 @@ test/benchmark_*.rtf
 # Logs
 *.log
 
+# GUI
+gui/node_modules/
+gui/dist/
+
 # OS
 .DS_Store
 Thumbs.db

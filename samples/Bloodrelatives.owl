@@ -1,0 +1,28 @@
+@prefix ex: <http://example.org/medical#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+### Classes
+ex:Person rdf:type owl:Class .
+ex:GeneticCondition rdf:type owl:Class .
+
+### Object Properties (Relationships)
+ex:hasParent rdf:type owl:ObjectProperty ;
+    rdfs:domain ex:Person ;
+    rdfs:range ex:Person .
+
+ex:hasSibling rdf:type owl:ObjectProperty ;
+    rdfs:domain ex:Person ;
+    rdfs:range ex:Person .
+
+# This is the special property that the reasoner will deduce
+ex:hasBloodRelative rdf:type owl:ObjectProperty ;
+    rdfs:domain ex:Person ;
+    rdfs:range ex:Person ;
+    # RULE: if X hasParent Y and Y hasSibling Z, then X hasBloodRelative Z
+    owl:propertyChainAxiom ( ex:hasParent ex:hasSibling ) .
+
+ex:isAtRiskFor rdf:type owl:ObjectProperty ;
+    rdfs:domain ex:Person ;
+    rdfs:range ex:GeneticCondition .
