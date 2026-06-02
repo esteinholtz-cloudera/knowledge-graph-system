@@ -19,6 +19,15 @@ from rdflib.namespace import OWL, RDFS
 
 from .placement_proposer import PlacementProposer
 from .proposal_store import ONT_BASE, ProposalStore
+from .review_helpers import (
+    apply_proposal_decision,
+    approve_with_wikidata_parent,
+    map_wikidata_parents as _map_wikidata_parents,
+    pick_wikidata_entity,
+    resolve_parent_uri,
+    search_wikidata,
+    wikidata_superclasses,
+)
 
 _DIVIDER = "═" * 52
 
@@ -72,53 +81,19 @@ def _print_wd_hits(hits: List[Dict]):
 
 
 def _pick_wd_result(pick: str, hits: List[Dict], uri: str, store, wikidata_mode: str) -> List[Dict]:
-    """
-    Handle a numbered pick from a Wikidata search result list.
-    Sets owl:equivalentClass and fetches P279 parents.
-    Returns the parents list (empty if pick was cancelled or SPARQL failed).
-    """
+    """Handle a numbered pick from a Wikidata search result list."""
     if not (pick.isdigit() and 1 <= int(pick) <= len(hits)):
         return []
     selected = hits[int(pick) - 1]
     qid = selected["qid"]
-    store.set_equivalent_class(uri, f"http://www.wikidata.org/entity/{qid}")
+    parents = pick_wikidata_entity(store, uri, qid, wikidata_mode)
     print(f"  → Added owl:equivalentClass wd:{qid}")
-    parents = _wikidata_superclasses(qid, wikidata_mode)
     if parents:
         print(f"  P279 chain: " + " → ".join(f"\"{p['label']}\"" for p in parents))
         print("  (use 'w' to place under a Wikidata parent, or choose a/b/c/m)")
     else:
         print("  (No P279 superclasses found — use 'p' to pick a different result, or a/b/c/m)")
     return parents
-
-
-def _accept_wikidata_parent(parent_info: Dict, store, ontology: Graph) -> tuple:
-    """
-    Resolve a Wikidata P279 parent to a local ontology URI.
-
-    If the parent label maps to an existing ont: class, returns (uri, None).
-    Otherwise creates a new *pending* class (so it enters the review queue)
-    and returns (uri, class_dict) — the caller should append class_dict to
-    the pending list so the chain is reviewed in the same session.
-    """
-    mapped = _map_wikidata_parents([parent_info], ontology)
-    if mapped:
-        return mapped, None
-
-    label = parent_info["label"]
-    qid = parent_info["qid"]
-    class_name = label.strip().title().replace(" ", "_")
-    new_uri = str(store.add_class(
-        label=label,
-        comment=f"Added via Wikidata P279 lookup (wd:{qid})",
-        proposed_by=f"wd:{qid}",
-        status="pending",
-    ))
-    store.set_equivalent_class(new_uri, f"http://www.wikidata.org/entity/{qid}")
-    print(f"  → Created pending class ont:{class_name} (≡ wd:{qid}) — will be reviewed next")
-    new_cls = {"uri": new_uri, "label": label, "comment": "", "status": "pending",
-               "proposed_by": f"wd:{qid}", "subclass_of": [], "equivalent_class": []}
-    return new_uri, new_cls
 
 
 def run_interactive_review(
@@ -197,8 +172,7 @@ def run_interactive_review(
             choice = input(f"\n  Choice [{letters}{wd_hint}{p_hint}/d/s/m/r]: ").strip().lower()
 
             if choice == "r":
-                store.set_status(uri, "rejected")
-                store.save()
+                apply_proposal_decision(store, uri, status="rejected")
                 print("  → Rejected.")
                 reviewed += 1
                 break
@@ -238,10 +212,9 @@ def run_interactive_review(
                     print("  Invalid choice.")
                     continue
                 parent_info = wikidata_parents[int(pick) - 1]
-                parent_uri, new_cls = _accept_wikidata_parent(parent_info, store, ontology)
-                store.set_subclass_of(uri, parent_uri)
-                store.set_status(uri, "approved")
-                store.save()
+                result = approve_with_wikidata_parent(store, uri, parent_info, ontology)
+                parent_uri = result["parent_uri"]
+                new_cls = result.get("new_pending_class")
                 print(f"  → rdfs:subClassOf {_label_uri(parent_uri)}")
                 print("  → Approved.")
                 reviewed += 1
@@ -254,17 +227,10 @@ def run_interactive_review(
 
             elif choice == "m":
                 raw = input("  Parent URI or 'ont:ClassName' (blank = owl:Thing): ").strip()
-                if not raw:
-                    parent = "http://www.w3.org/2002/07/owl#Thing"
-                elif raw.startswith("ont:"):
-                    parent = ONT_BASE + raw[4:]
-                elif raw.startswith("http"):
-                    parent = raw
-                else:
-                    parent = ONT_BASE + raw.replace(" ", "_")
-                store.set_subclass_of(uri, parent)
-                store.set_status(uri, "approved")
-                store.save()
+                parent = resolve_parent_uri(raw)
+                apply_proposal_decision(
+                    store, uri, status="approved", parent_class_uri=raw or "owl:Thing",
+                )
                 print(f"  → rdfs:subClassOf {_label_uri(parent)}")
                 print("  → Approved.")
                 reviewed += 1
@@ -274,9 +240,9 @@ def run_interactive_review(
                 idx_choice = ord(choice) - ord("a")
                 if idx_choice < len(proposals):
                     chosen = proposals[idx_choice]
-                    store.set_subclass_of(uri, chosen["parent"])
-                    store.set_status(uri, "approved")
-                    store.save()
+                    apply_proposal_decision(
+                        store, uri, status="approved", parent_class_uri=chosen["parent"],
+                    )
                     print(f"  → rdfs:subClassOf {_label_uri(chosen['parent'])}")
                     print("  → Approved.")
                     reviewed += 1
@@ -417,47 +383,15 @@ def _review_entity_retyping(
     return reviewed
 
 
-# ------------------------------------------------------------------
-# Wikidata helpers (isolated so mode can be switched)
-# ------------------------------------------------------------------
-
 def _wikidata_search(term: str, mode: str) -> List[Dict]:
-    if mode == "disabled":
-        return []
-    try:
-        from .wikidata_client import WikidataClient
-        with WikidataClient() as wd:
-            return wd.search_entity(term)
-    except Exception as e:
-        print(f"  [Wikidata] search failed: {e}")
-        return []
+    hits = search_wikidata(term, mode)
+    if not hits and mode != "disabled":
+        print(f"  [Wikidata] no results for '{term}'")
+    return hits
 
 
 def _wikidata_superclasses(qid: str, mode: str) -> List[Dict]:
-    if mode == "disabled":
-        return []
-    try:
-        from .wikidata_client import WikidataClient
-        with WikidataClient() as wd:
-            return wd.get_superclasses(qid)
-    except Exception as e:
-        print(f"  [Wikidata] superclass lookup failed: {e}")
-        return []
-
-
-def _map_wikidata_parents(parents: List[Dict], ontology: Graph) -> Optional[str]:
-    """
-    Try to map Wikidata parent labels to an existing ontology class URI.
-    Returns the best matching ontology URI or None.
-    """
-    ont_classes = {
-        str(next(ontology.objects(s, RDFS.label), "")).lower(): str(s)
-        for s in ontology.subjects(None, None)
-        if str(s).startswith(ONT_BASE)
-    }
-    for parent in parents:
-        lbl = parent.get("label", "").lower()
-        for ont_label, ont_uri in ont_classes.items():
-            if ont_label and (lbl in ont_label or ont_label in lbl):
-                return ont_uri
-    return None
+    parents = wikidata_superclasses(qid, mode)
+    if not parents and mode != "disabled":
+        print(f"  [Wikidata] superclass lookup failed for {qid}")
+    return parents

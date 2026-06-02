@@ -11,10 +11,58 @@ Usage:
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import threading
+import urllib.parse
+import urllib.request
 from typing import Any, Dict, List, Optional
+
+_QID_RE = re.compile(r"Q\d+", re.IGNORECASE)
+_WIKIDATA_API = "https://www.wikidata.org/w/api.php"
+
+
+def _qid_from_value(value: Any) -> str:
+    """Extract a Wikidata QID from a string or URI."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    if text.startswith("http://") or text.startswith("https://"):
+        text = text.rsplit("/", 1)[-1]
+    match = _QID_RE.search(text)
+    return match.group(0).upper() if match else ""
+
+
+def _normalize_entity_hit(item: Any) -> Optional[Dict[str, str]]:
+    """Normalize MCP / API shapes to {qid, label, description}."""
+    if isinstance(item, str):
+        qid = _qid_from_value(item)
+        if not qid:
+            return None
+        return {"qid": qid, "label": "", "description": ""}
+    if not isinstance(item, dict):
+        return None
+    qid = _qid_from_value(
+        item.get("qid")
+        or item.get("id")
+        or item.get("entity_id")
+        or item.get("entity")
+        or item.get("uri")
+    )
+    if not qid:
+        return None
+    label = str(
+        item.get("label")
+        or item.get("title")
+        or item.get("name")
+        or item.get("entity_label")
+        or ""
+    ).strip()
+    desc = str(item.get("description") or item.get("desc") or "").strip()
+    return {"qid": qid, "label": label, "description": desc}
 
 _MCP_CMD = [
     "uvx",
@@ -146,42 +194,32 @@ class WikidataClient:
         Search for Wikidata entities matching `query`.
         Returns list of {"qid", "label", "description"}.
         """
-        import re
         raw = self._tool_call("search_entity", {"query": query})
+        hits: List[Dict[str, str]] = []
 
-        # Try JSON first, then fall back to regex extraction of Q-numbers.
-        # The MCP server may return JSON, comma/newline separated strings,
-        # or concatenated QIDs like "Q1234Q5678".
-        qids: List[str] = []
         try:
             parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                qids = [str(q).strip() for q in parsed if str(q).strip()]
+            if isinstance(parsed, dict):
+                hit = _normalize_entity_hit(parsed)
+                if hit:
+                    hits.append(hit)
+            elif isinstance(parsed, list):
+                for item in parsed:
+                    hit = _normalize_entity_hit(item)
+                    if hit:
+                        hits.append(hit)
             elif isinstance(parsed, str):
-                qids = [parsed.strip()]
+                qid = _qid_from_value(parsed)
+                if qid:
+                    hits.append({"qid": qid, "label": "", "description": ""})
         except (json.JSONDecodeError, TypeError):
             pass
 
-        if not qids:
-            qids = re.findall(r'Q\d+', raw)
+        if not hits:
+            for qid in _QID_RE.findall(raw)[:5]:
+                hits.append({"qid": qid.upper(), "label": "", "description": ""})
 
-        qids = qids[:5]
-        # Batch-fetch labels+descriptions in one SPARQL call rather than one
-        # get_metadata call per QID — avoids repeated API calls that trigger 403s.
-        labels = self._batch_labels(qids)
-
-        results = []
-        for qid in qids:
-            if qid in labels:
-                results.append({"qid": qid, **labels[qid]})
-            else:
-                # SPARQL batch failed for this QID; fall back to get_metadata
-                try:
-                    meta = self.get_metadata(qid)
-                    results.append({"qid": qid, "label": meta["label"], "description": meta["description"]})
-                except Exception:
-                    results.append({"qid": qid, "label": qid, "description": ""})
-        return results
+        return self._enrich_labels(hits[:5])
 
     @staticmethod
     def _parse_sparql_rows(raw: str) -> List[Dict]:
@@ -214,6 +252,75 @@ class WikidataClient:
             except json.JSONDecodeError:
                 break
         return rows
+
+    @staticmethod
+    def _labels_via_wikidata_api(qids: List[str]) -> Dict[str, Dict[str, str]]:
+        """Fetch English labels via the public Wikidata API (no MCP)."""
+        if not qids:
+            return {}
+        params = urllib.parse.urlencode({
+            "action": "wbgetentities",
+            "ids": "|".join(qids[:50]),
+            "props": "labels|descriptions",
+            "languages": "en",
+            "format": "json",
+        })
+        try:
+            with urllib.request.urlopen(
+                f"{_WIKIDATA_API}?{params}",
+                timeout=12,
+            ) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception:
+            return {}
+
+        out: Dict[str, Dict[str, str]] = {}
+        for qid, ent in (data.get("entities") or {}).items():
+            if not qid.startswith("Q"):
+                continue
+            label = ((ent.get("labels") or {}).get("en") or {}).get("value", "")
+            desc = ((ent.get("descriptions") or {}).get("en") or {}).get("value", "")
+            if label:
+                out[qid] = {"label": label, "description": desc}
+        return out
+
+    def _enrich_labels(self, hits: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Fill missing labels/descriptions using API, SPARQL, then get_metadata."""
+        if not hits:
+            return hits
+        need = [
+            h["qid"]
+            for h in hits
+            if not (h.get("label") or "").strip() or h.get("label") == h["qid"]
+        ]
+        if not need:
+            return hits
+
+        merged: Dict[str, Dict[str, str]] = {}
+        merged.update(self._labels_via_wikidata_api(need))
+        still = [q for q in need if q not in merged]
+        if still:
+            merged.update(self._batch_labels(still))
+        still = [q for q in need if q not in merged or not merged[q].get("label")]
+        for qid in still:
+            try:
+                meta = self.get_metadata(qid)
+                if meta.get("label") and meta["label"] != qid:
+                    merged[qid] = meta
+            except Exception:
+                continue
+
+        for hit in hits:
+            extra = merged.get(hit["qid"])
+            if not extra:
+                continue
+            if extra.get("label"):
+                hit["label"] = extra["label"]
+            if extra.get("description"):
+                hit["description"] = extra["description"]
+            elif not hit.get("description"):
+                hit["description"] = extra.get("description", "")
+        return hits
 
     def _batch_labels(self, qids: List[str]) -> Dict[str, Dict[str, str]]:
         """Fetch English labels and descriptions for multiple QIDs in one SPARQL call.
@@ -279,8 +386,12 @@ class WikidataClient:
             label = (row.get("parentLabel") or {}).get("value", "")
             qid_part = parent_uri.split("/")[-1] if "/" in parent_uri else parent_uri
             if qid_part:
-                results.append({"qid": qid_part, "label": label or qid_part})
-        return results
+                results.append({
+                    "qid": qid_part.upper(),
+                    "label": label.strip() if label else "",
+                    "description": "",
+                })
+        return self._enrich_labels(results)
 
 
 def wikidata_search(query: str, cmd: Optional[List[str]] = None) -> List[Dict[str, str]]:

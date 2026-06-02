@@ -125,6 +125,12 @@ class StorageSettings(BaseModel):
     ontology_file: str = "data/ontology/ontology.ttl"
 
 
+class PipelineSettings(BaseModel):
+    # Max parallel LLM calls per chunk batch (entity + relationship passes).
+    # Use 1 for local Ollama/LM Studio; increase for cloud APIs.
+    max_concurrent_llm_calls: int = 1
+
+
 class N8nSettings(BaseModel):
     host: str = "0.0.0.0"
     port: int = 5000
@@ -185,6 +191,7 @@ class VisualizationSettings(BaseModel):
 class AppSettings(BaseModel):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
+    pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
     n8n: N8nSettings = Field(default_factory=N8nSettings)
     extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
     entity_resolution: EntityResolutionSettings = Field(default_factory=EntityResolutionSettings)

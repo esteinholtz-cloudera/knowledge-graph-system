@@ -93,6 +93,19 @@ CREATE TABLE IF NOT EXISTS resolution_runs (
 CREATE SEQUENCE IF NOT EXISTS seq_chunks    START 1;
 CREATE SEQUENCE IF NOT EXISTS seq_llm       START 1;
 CREATE SEQUENCE IF NOT EXISTS seq_res       START 1;
+CREATE SEQUENCE IF NOT EXISTS seq_sub_tax   START 1;
+
+CREATE TABLE IF NOT EXISTS sub_taxonomy_approvals (
+    id                INTEGER PRIMARY KEY DEFAULT nextval('seq_sub_tax'),
+    proposal_id       TEXT,
+    action            TEXT,
+    leaf_class_uri    TEXT,
+    entity_uri        TEXT,
+    class_uris        TEXT,
+    merged_classes    INTEGER,
+    entity_retyped    BOOLEAN,
+    recorded_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -112,6 +125,9 @@ class NullBenchmarkStore:
         pass
 
     def record_resolution(self, *args, **kwargs):
+        pass
+
+    def record_sub_taxonomy_approval(self, *args, **kwargs):
         pass
 
     def query(self, sql: str):
@@ -295,6 +311,35 @@ class BenchmarkStore:
             [run_id, strategy, entities_before, entities_after, elapsed_s],
         )
 
+    def record_sub_taxonomy_approval(
+        self,
+        proposal_id: str,
+        action: str,
+        leaf_class_uri: str = "",
+        entity_uri: Optional[str] = None,
+        class_uris: Optional[list] = None,
+        merged_classes: int = 0,
+        entity_retyped: bool = False,
+    ) -> None:
+        import json
+        self._con.execute(
+            """
+            INSERT INTO sub_taxonomy_approvals (
+                proposal_id, action, leaf_class_uri, entity_uri,
+                class_uris, merged_classes, entity_retyped
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                proposal_id,
+                action,
+                leaf_class_uri or "",
+                entity_uri or "",
+                json.dumps(class_uris or []),
+                merged_classes,
+                entity_retyped,
+            ],
+        )
+
     # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
@@ -303,7 +348,14 @@ class BenchmarkStore:
         return self._con.sql(sql)
 
     def clear(self):
-        for table in ("resolution_runs", "llm_calls", "chunks", "run_strategies", "runs"):
+        for table in (
+            "sub_taxonomy_approvals",
+            "resolution_runs",
+            "llm_calls",
+            "chunks",
+            "run_strategies",
+            "runs",
+        ):
             self._con.execute(f"DELETE FROM {table}")
 
     def close(self):

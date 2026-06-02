@@ -20,7 +20,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from main import process_and_extract  # noqa: E402
+from src.services import PipelineOptions, PipelineService  # noqa: E402
 
 KG_OUTPUT_DIR = str(PROJECT_ROOT / "data" / "knowledge_graphs")
 
@@ -74,7 +74,9 @@ def _cleanup(result: Optional[dict]):
 def _run_pipeline(doc_filename: str) -> dict:
     doc_path = PROJECT_ROOT / "data" / "documents" / doc_filename
     assert doc_path.exists(), f"Document not found: {doc_path}"
-    return process_and_extract(file_path=str(doc_path), output_dir=KG_OUTPUT_DIR)
+    return PipelineService(PROJECT_ROOT).run(
+        PipelineOptions(file_path=str(doc_path), output_dir=KG_OUTPUT_DIR),
+    ).as_dict()
 
 
 def _assert_ttl_valid(ttl_path: str):

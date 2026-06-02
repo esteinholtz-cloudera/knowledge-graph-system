@@ -138,11 +138,12 @@ knowledge-graph-system/
 │   ├── ontology/ontology.ttl
 │   └── metadata.json
 ├── src/
+│   ├── services/            # Orchestration (CLI, future HTTP API)
 │   ├── config/              # Settings loader
 │   ├── document/            # Parsing, HTML markup
 │   ├── extraction/          # LLM entity/relationship extraction
 │   └── storage/             # Turtle writer, ontology manager
-└── main.py                  # CLI: process | server
+└── main.py                  # Thin CLI dispatch → services
 ```
 
 ## Features
@@ -183,7 +184,7 @@ uv run python main.py archive --llmnamed
 uv run python main.py benchmark show
 uv run python main.py benchmark query "SELECT llm_model, avg(elapsed_s) FROM runs GROUP BY llm_model"
 
-# n8n integration server
+# HTTP API + legacy n8n routes
 uv run python main.py server --port 5000
 ```
 
@@ -198,17 +199,79 @@ Supported inputs: `.txt`, `.md`, `.pdf`, `.docx`.
 - **storage** — directories for graphs, documents, ontology
 - **entity_resolution** — `enabled`, `strategies` (rule_based / embedding / llm), `embedding_threshold`, `abbreviation_hints`
 - **visualization** — `ai_kg_path` (path to `ai-knowledge-graph` for `--with-graph`)
+- **pipeline** — `max_concurrent_llm_calls` (default `1`; raise for cloud APIs)
 
 API keys belong in the environment only (never in YAML). Copy [`.env.example`](.env.example) as a reminder.
 
-## n8n API
+## HTTP API
 
-With the server running:
+With `uv run python main.py server` running, the GUI and integrations should use **`/api/v1`**.
 
-- `GET /health`
-- `POST /process` — body: `{"file_path": "...", "chunk_size": 1000, "overlap": 100}`
-- `POST /extract/entities`, `POST /extract/relationships`, `POST /store`
-- `GET /metadata`, `GET /metadata/<document_id>`
+Domain shapes (entities, triples, jobs, API payloads) are documented in [docs/INFOMODEL.md](docs/INFOMODEL.md).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/health/precheck` | LLM/embed preflight (JSON) |
+| `GET` | `/api/v1/config` | Sanitized config (no secrets) |
+| `POST` | `/api/v1/jobs/pipeline` | Start full pipeline → `{ "job_id" }` |
+| `GET` | `/api/v1/jobs/<id>` | Job status + result |
+| `GET` | `/api/v1/jobs/<id>/events` | SSE progress stream |
+| `POST` | `/api/v1/jobs/<id>/cancel` | Request cancellation |
+| `GET` | `/api/v1/documents` | List processed documents |
+| `POST` | `/api/v1/documents/upload` | Upload to `data/documents/` |
+| `GET` | `/api/v1/artifacts/<id>/kg` | Download TTL |
+
+Example:
+
+```bash
+# Start pipeline (async)
+curl -s -X POST http://127.0.0.1:5000/api/v1/jobs/pipeline \
+  -H 'Content-Type: application/json' \
+  -d '{"file_path":"data/documents/my-doc.txt","with_graph":true}'
+
+# Stream progress (replace JOB_ID)
+curl -N http://127.0.0.1:5000/api/v1/jobs/JOB_ID/events
+```
+
+Legacy n8n routes (`POST /process`, `GET /metadata`, …) remain at `/` with a `Deprecation` header; prefer `/api/v1`.
+
+**Review and admin (Phase 4):**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/ontology/status` | Proposal summary |
+| `PATCH` | `/api/v1/ontology/proposals/{uri}` | Approve/reject, set parent class |
+| `POST` | `/api/v1/ontology/proposals/{uri}/suggest-placement` | LLM + Wikidata suggestions |
+| `POST` | `/api/v1/ontology/approve` | Merge approved into `ontology.ttl` |
+| `GET` | `/api/v1/normalize/map` | Read predicate map |
+| `PATCH` | `/api/v1/normalize/map/groups/{canonical}` | Mark group reviewed |
+| `POST` | `/api/v1/normalize/apply` | Apply map (`dry_run` optional) |
+| `GET` | `/api/v1/benchmark/runs` | Benchmark tables as JSON |
+| `POST` | `/api/v1/archive` | Archive `data/` |
+
+Encode proposal URIs in paths with `urllib.parse.quote(uri, safe="")`.
+
+## Web GUI (Phase 5)
+
+```bash
+# Terminal 1 — API (use the port your config expects)
+uv run python main.py server --port 5000
+
+# Terminal 2 — UI (proxies /api → :5000)
+cd gui && npm install && npm run dev
+```
+
+Open http://localhost:5173. See [gui/README.md](gui/README.md) for build and route details.
+
+## Documentation
+
+| Doc | Contents |
+|-----|----------|
+| [docs/INFOMODEL.md](docs/INFOMODEL.md) | Internal information model — interconnection schema, domain objects, `/api/v1` mapping |
+| [docs/ONTOLOGY.md](docs/ONTOLOGY.md) | Ontology workflow, OWL structure, CLI review |
+| [docs/Benchmark.md](docs/Benchmark.md) | DuckDB benchmark schema and queries |
+| [docs/GUI_API_PLAN.md](docs/GUI_API_PLAN.md) | HTTP API and GUI architecture |
+| [gui/README.md](gui/README.md) | Web UI setup and routes |
 
 ## Ontology management
 

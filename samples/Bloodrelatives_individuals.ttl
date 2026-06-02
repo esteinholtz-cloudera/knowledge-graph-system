@@ -1,0 +1,14 @@
+@prefix ex: <http://example.org/medical#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+### Individuals
+ex:Alice rdf:type ex:Person .
+ex:Bob rdf:type ex:Person .
+ex:Charlie rdf:type ex:Person .
+ex:HuntingtonsDisease rdf:type ex:GeneticCondition .
+
+### The Asserted Data Facts
+ex:Alice ex:hasParent ex:Bob .
+ex:Bob ex:hasSibling ex:Charlie .
+ex:Charlie ex:hasDiagnosedCondition ex:HuntingtonsDisease .
