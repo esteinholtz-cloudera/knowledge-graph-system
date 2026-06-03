@@ -33,6 +33,31 @@ STATUS_APPROVED = Literal("approved")
 STATUS_REJECTED = Literal("rejected")
 STATUS_NEEDS_TYPING = Literal("needs_typing")
 
+# Proposal-only predicates — must never appear in ontology.ttl.
+PROPOSAL_META_PREDICATE_URIS = frozenset({
+    str(REVIEW_STATUS),
+    str(PROPOSED_BY),
+    str(SUB_TAXONOMY_ID),
+    str(LEAF_CLASS_URI),
+    str(ONT_META.subclassLinkSource),
+    str(ENTITY_LABEL),
+    str(SOURCE_TTL),
+    str(ONT_META.entityURI),
+})
+
+
+def is_proposal_meta_predicate(predicate) -> bool:
+    return str(predicate) in PROPOSAL_META_PREDICATE_URIS
+
+
+def strip_meta_triples_from_graph(graph: Graph) -> int:
+    """Remove proposal workflow triples from an ontology graph. Returns count removed."""
+    to_remove = [t for t in graph if is_proposal_meta_predicate(t[1])]
+    for triple in to_remove:
+        graph.remove(triple)
+    return len(to_remove)
+
+
 _HEADER = """\
 # ontology_proposed.ttl — DIFFERENTIAL additions only
 # Generated: {ts}
@@ -239,30 +264,19 @@ class ProposalStore:
             ontology.parse(str(self.ontology_file), format="turtle")
 
         approved = self._get_by_status("approved")
-        if not approved:
-            return 0
-
-        # Predicates that live only in the proposal store and must not be
-        # copied into the approved ontology file.
-        _META_PREDICATES = frozenset({
-            REVIEW_STATUS,
-            PROPOSED_BY,
-            SUB_TAXONOMY_ID,
-            LEAF_CLASS_URI,
-            ONT_META.subclassLinkSource,
-            ONT_META.subTaxonomyId,
-            ENTITY_LABEL,
-            SOURCE_TTL,
-        })
 
         for cls_info in approved:
             uri = URIRef(cls_info["uri"])
             for s, p, o in self._graph.triples((uri, None, None)):
-                if p in _META_PREDICATES:
+                if is_proposal_meta_predicate(p):
                     continue
                 ontology.add((s, p, o))
 
-        ontology.serialize(destination=str(self.ontology_file), format="turtle")
+        stripped = strip_meta_triples_from_graph(ontology)
+        if approved or stripped:
+            ontology.serialize(destination=str(self.ontology_file), format="turtle")
+        if not approved:
+            return 0
 
         # Mark merged classes as removed from proposals
         for cls_info in approved:

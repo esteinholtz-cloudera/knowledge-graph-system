@@ -93,6 +93,31 @@ def test_approve_sub_taxonomy_merge(tmp_path):
 
     ontology = (tmp_path / "data" / "ontology" / "ontology.ttl").read_text()
     assert "NewTool" in ontology
+    assert "subTaxonomyId" not in ontology
+    assert "subclassLinkSource" not in ontology
+
+
+def test_merge_strips_existing_meta_from_ontology(tmp_path):
+    store = _store(tmp_path)
+    ont_path = tmp_path / "data" / "ontology" / "ontology.ttl"
+    ont_path.write_text(
+        _MINIMAL_ONT
+        + """
+@prefix ont_meta: <http://example.org/ontology/meta/> .
+ont:Stale a owl:Class ;
+    rdfs:label "Stale" ;
+    ont_meta:subTaxonomyId "old-bundle-id" .
+""",
+        encoding="utf-8",
+    )
+    store = ProposalStore(
+        str(tmp_path / "data" / "ontology" / "ontology_proposed.ttl"),
+        str(ont_path),
+    )
+    assert store.merge_approved_into_ontology() == 0
+    text = ont_path.read_text()
+    assert "subTaxonomyId" not in text
+    assert "Stale" in text
 
 
 def test_approve_sub_taxonomy_retry_after_merge_failure(tmp_path):
