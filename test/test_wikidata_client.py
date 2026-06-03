@@ -49,6 +49,22 @@ def test_search_entity_parses_mcp_dict_list():
     assert results[1]["label"] == "human"
 
 
+def test_get_p279_chain_walks_up():
+    client = WikidataClient.__new__(WikidataClient)
+    calls = {"Q1": [{"qid": "Q2", "label": "parent"}], "Q2": []}
+
+    def fake_super(qid):
+        return calls.get(qid, [])
+
+    client.get_superclasses = MagicMock(side_effect=fake_super)
+    client.get_metadata = MagicMock(return_value={"label": "entity", "description": ""})
+
+    chain = client.get_p279_chain("Q1", max_depth=5)
+    assert len(chain) == 2
+    assert chain[0]["qid"] == "Q1"
+    assert chain[1]["qid"] == "Q2"
+
+
 def test_enrich_labels_uses_wikidata_api():
     client = WikidataClient.__new__(WikidataClient)
     with patch.object(

@@ -20,6 +20,7 @@ class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public details?: unknown,
   ) {
     super(message);
   }
@@ -29,10 +30,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, init);
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg =
-      (body as { error?: { message?: string } })?.error?.message ||
-      res.statusText;
-    throw new ApiError(msg, res.status);
+    const errBody = body as { error?: { message?: string; details?: unknown } };
+    const msg = errBody?.error?.message || res.statusText;
+    throw new ApiError(msg, res.status, errBody?.error?.details);
   }
   return body as T;
 }
@@ -159,7 +159,7 @@ export function approveSubTaxonomy(
   proposalId: string,
   action: "approve" | "reject",
   chain?: Array<{ qid?: string; label: string; uri?: string }>,
-): Promise<{ action: string; proposal_id: string; merged_classes?: number; entity_retyped?: boolean }> {
+): Promise<{ action: string; proposal_id: string; merged_classes?: number; entity_retyped?: boolean; already_merged?: boolean }> {
   return request(`/ontology/sub-taxonomy/${encodeURIComponent(proposalId)}/approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -183,18 +183,35 @@ export function updateOntologyProposal(
   });
 }
 
-export function suggestPlacement(uri: string, searchTerm?: string): Promise<SuggestPlacementResponse> {
+export function getSubTaxonomy(proposalId: string): Promise<SubTaxonomyProposal> {
+  return request(`/ontology/sub-taxonomy/${encodeURIComponent(proposalId)}`);
+}
+
+export function diagnoseSubTaxonomy(proposalId: string): Promise<Record<string, unknown>> {
+  return request(`/ontology/sub-taxonomy/${encodeURIComponent(proposalId)}/diagnose`);
+}
+
+export function suggestPlacement(
+  uri: string,
+  opts?: {
+    searchTerm?: string;
+    ancestorChain?: Array<{ qid?: string; label: string; uri?: string; source?: string }>;
+  },
+): Promise<SuggestPlacementResponse> {
+  const body: Record<string, unknown> = {};
+  if (opts?.searchTerm) body.search_term = opts.searchTerm;
+  if (opts?.ancestorChain?.length) body.ancestor_chain = opts.ancestorChain;
   return request(`/ontology/proposals/${encodeURIComponent(uri)}/suggest-placement`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(searchTerm ? { search_term: searchTerm } : {}),
+    body: JSON.stringify(body),
   });
 }
 
 export function searchWikidata(
   uri: string,
   searchTerm?: string,
-): Promise<{ search_term: string; wikidata_hits: WikidataHit[] }> {
+): Promise<{ search_term: string; wikidata_hits: WikidataHit[]; wikidata_error?: string | null }> {
   return request(`/ontology/proposals/${encodeURIComponent(uri)}/wikidata-search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -238,6 +255,17 @@ export function getWikidataSuperclasses(qid: string): Promise<{
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ qid }),
+  });
+}
+
+export function getWikidataP279Chain(
+  qid: string,
+  maxDepth = 12,
+): Promise<{ qid: string; chain: WikidataHit[]; parent_choices: WikidataParentChoice[] }> {
+  return request("/ontology/wikidata-p279-chain", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ qid, max_depth: maxDepth }),
   });
 }
 

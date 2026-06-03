@@ -208,6 +208,23 @@
   opacity: 0.85;
 }
 
+/* Focused chain node — highlighted with accent border */
+.chain-node--focused {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border: 2px solid var(--accent) !important;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chain-node--focused:hover {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface));
+}
+
+/* Nodes above the focused one are dimmed */
+.chain-node--above-focused {
+  opacity: 0.45;
+}
+
 .chain-tag {
   font-size: 0.68rem;
   padding: 0.05rem 0.35rem;
@@ -218,6 +235,12 @@
 
 .chain-node--proposal .chain-tag {
   background: rgba(255, 255, 255, 0.25);
+}
+
+/* "focused" badge inside a focused chain node */
+.chain-tag--focused {
+  background: var(--accent);
+  color: #fff;
 }
 
 .proposals-group-header {
@@ -245,5 +268,141 @@
   font-size: 0.78rem;
   word-break: break-word;
   line-height: 1.4;
+}
+
+.taxonomy-review-page {
+  display: block;
+  width: 100%;
+  min-height: 100vh;
+  padding: 1.25rem 1.75rem 2rem;
+  box-sizing: border-box;
+}
+
+.taxonomy-review-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.taxonomy-review-status {
+  width: 100%;
+  margin-bottom: 0.75rem;
+}
+
+.taxonomy-review-status p {
+  margin: 0.25rem 0;
+}
+
+.taxonomy-review-msg {
+  white-space: normal;
+}
+
+.taxonomy-review-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 22rem) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+  width: 100%;
+}
+
+@media (max-width: 960px) {
+  .taxonomy-review-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.taxonomy-review-chain-panel {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+
+.proposal-panel {
+  min-width: 0;
+}
+
+/* Header bar when a chain node is focused */
+.proposal-panel__focused-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid var(--accent);
+}
+
+/* Manual entry strip at the bottom of the proposal panel */
+.proposal-panel__manual {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.proposal-panel__columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (min-width: 1100px) {
+  .proposal-panel__columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .proposal-panel__columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wikidata-search-row {
+  margin-bottom: 0.5rem;
+}
+
+.wikidata-hits-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.65rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.proposal-panel__group {
+  margin-top: 0.75rem;
+}
+
+.wd-p279-chain-panel {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.wd-p279-list {
+  margin: 0.35rem 0 0.65rem;
+  padding-left: 1.25rem;
+  font-size: 0.82rem;
+}
+
+.wd-p279-list li {
+  margin-bottom: 0.2rem;
+}
+
+.taxonomy-viz-window {
+  padding: 1rem 1.25rem;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.chain-viz--compact .chain-viz__body {
+  font-size: 0.8rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
 }
 

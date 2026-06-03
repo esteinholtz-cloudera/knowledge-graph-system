@@ -133,8 +133,12 @@ class PipelineSettings(BaseModel):
 
 class N8nSettings(BaseModel):
     host: str = "0.0.0.0"
-    port: int = 5000
+    port: int = 5001
     debug: bool = False
+
+
+class GuiSettings(BaseModel):
+    port: int = 5173
 
 
 class EntityResolutionSettings(BaseModel):
@@ -193,6 +197,7 @@ class AppSettings(BaseModel):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
     n8n: N8nSettings = Field(default_factory=N8nSettings)
+    gui: GuiSettings = Field(default_factory=GuiSettings)
     extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
     entity_resolution: EntityResolutionSettings = Field(default_factory=EntityResolutionSettings)
     ontology: OntologySettings = Field(default_factory=OntologySettings)

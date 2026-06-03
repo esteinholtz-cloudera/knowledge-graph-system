@@ -1,9 +1,21 @@
 """Main CLI entry point for knowledge graph system."""
-import argparse
 import sys
 from pathlib import Path
 
+# Re-exec with the project virtualenv if we were launched with the system Python.
+# This catches the common mistake of running `python main.py ...` instead of
+# `.venv/bin/python main.py ...` (which produces ModuleNotFoundError for yaml,
+# rdflib, etc.).
+_HERE = Path(__file__).resolve().parent
+_VENV_PYTHON = _HERE / ".venv" / "bin" / "python"
+if _VENV_PYTHON.exists() and Path(sys.executable).resolve() != _VENV_PYTHON.resolve():
+    import os
+    os.execv(str(_VENV_PYTHON), [str(_VENV_PYTHON)] + sys.argv)
+
+import argparse
+
 from src.cli.formatters import print_ontology_status, print_pipeline_summary, print_precheck
+from src.config.settings import load_config
 from src.extraction.entity_extractor import ExtractionError
 from src.services import (
     ArchiveService,
@@ -30,9 +42,10 @@ def main():
     p.add_argument("--with-graph", action="store_true", help="Generate graph HTML")
     p.add_argument("--domain", default="default", help="Extraction domain profile")
 
+    server_cfg = load_config(str(_PROJECT_ROOT / "config" / "config.yaml")).n8n
     s = subparsers.add_parser("server", help="Start n8n API server")
-    s.add_argument("--host", default="0.0.0.0")
-    s.add_argument("--port", type=int, default=5000)
+    s.add_argument("--host", default=server_cfg.host)
+    s.add_argument("--port", type=int, default=server_cfg.port)
     s.add_argument("--debug", action="store_true")
 
     arc_p = subparsers.add_parser("archive", help="Archive data/ and reset")
@@ -45,6 +58,11 @@ def main():
     ont_sub.add_parser("review")
     ont_sub.add_parser("status")
     ont_sub.add_parser("visualize")
+    ont_diag = ont_sub.add_parser("diagnose", help="Explain why a SubTaxonomyProposal id cannot be loaded")
+    ont_diag.add_argument(
+        "proposal_id",
+        help="UUID or full review URL (http://…/ontology/review/<uuid>) — the UUID is extracted automatically",
+    )
 
     norm_p = subparsers.add_parser("normalize", help="Predicate normalization")
     norm_sub = norm_p.add_subparsers(dest="norm_command")
@@ -88,7 +106,8 @@ def main():
 
     elif args.command == "server":
         from src.api.app import create_app
-        create_app(_PROJECT_ROOT).run(host=args.host, port=args.port, debug=args.debug)
+        debug = args.debug or server_cfg.debug
+        create_app(_PROJECT_ROOT).run(host=args.host, port=args.port, debug=debug)
 
     elif args.command == "archive":
         try:
@@ -125,6 +144,20 @@ def main():
         elif args.ont_command == "visualize":
             if ont_svc.visualize() is None:
                 print("ontology.ttl not found.")
+        elif args.ont_command == "diagnose":
+            import json
+            import re as _re
+            raw = args.proposal_id
+            # Accept full review URLs — extract the trailing UUID/id segment.
+            _uuid_match = _re.search(
+                r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+                raw,
+                _re.I,
+            )
+            proposal_id = _uuid_match.group(1) if _uuid_match else raw
+            if proposal_id != raw:
+                print(f"(extracted id from URL: {proposal_id})\n")
+            print(json.dumps(ont_svc.diagnose_sub_taxonomy(proposal_id), indent=2))
         else:
             ont_p.print_help()
 

@@ -242,11 +242,23 @@ class ProposalStore:
         if not approved:
             return 0
 
+        # Predicates that live only in the proposal store and must not be
+        # copied into the approved ontology file.
+        _META_PREDICATES = frozenset({
+            REVIEW_STATUS,
+            PROPOSED_BY,
+            SUB_TAXONOMY_ID,
+            LEAF_CLASS_URI,
+            ONT_META.subclassLinkSource,
+            ONT_META.subTaxonomyId,
+            ENTITY_LABEL,
+            SOURCE_TTL,
+        })
+
         for cls_info in approved:
             uri = URIRef(cls_info["uri"])
-            # Copy all triples for this class except meta triples
             for s, p, o in self._graph.triples((uri, None, None)):
-                if p in (REVIEW_STATUS, PROPOSED_BY):
+                if p in _META_PREDICATES:
                     continue
                 ontology.add((s, p, o))
 

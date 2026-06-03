@@ -62,11 +62,15 @@ storage:
   ontology_dir: "data/ontology"
   ontology_file: "data/ontology/ontology.ttl"
 
-# n8n Server Configuration
+# HTTP API server (main.py server, GUI proxy target)
 n8n:
   host: "0.0.0.0"
-  port: 5000
+  port: 5001
   debug: false
+
+# Web GUI dev server (Vite)
+gui:
+  port: 5173
 
 # Extraction Configuration
 extraction:

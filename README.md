@@ -184,8 +184,8 @@ uv run python main.py archive --llmnamed
 uv run python main.py benchmark show
 uv run python main.py benchmark query "SELECT llm_model, avg(elapsed_s) FROM runs GROUP BY llm_model"
 
-# HTTP API + legacy n8n routes
-uv run python main.py server --port 5000
+# HTTP API + legacy n8n routes (port from config/config.yaml, default 5001)
+uv run python main.py server
 ```
 
 Supported inputs: `.txt`, `.md`, `.pdf`, `.docx`.
@@ -225,12 +225,12 @@ Example:
 
 ```bash
 # Start pipeline (async)
-curl -s -X POST http://127.0.0.1:5000/api/v1/jobs/pipeline \
+curl -s -X POST http://127.0.0.1:5001/api/v1/jobs/pipeline \
   -H 'Content-Type: application/json' \
   -d '{"file_path":"data/documents/my-doc.txt","with_graph":true}'
 
 # Stream progress (replace JOB_ID)
-curl -N http://127.0.0.1:5000/api/v1/jobs/JOB_ID/events
+curl -N http://127.0.0.1:5001/api/v1/jobs/JOB_ID/events
 ```
 
 Legacy n8n routes (`POST /process`, `GET /metadata`, …) remain at `/` with a `Deprecation` header; prefer `/api/v1`.
@@ -253,15 +253,28 @@ Encode proposal URIs in paths with `urllib.parse.quote(uri, safe="")`.
 
 ## Web GUI (Phase 5)
 
-```bash
-# Terminal 1 — API (use the port your config expects)
-uv run python main.py server --port 5000
+**One command** (reads `n8n.port` and `gui.port` from [`config/config.yaml`](config/config.yaml)):
 
-# Terminal 2 — UI (proxies /api → :5000)
-cd gui && npm install && npm run dev
+```bash
+./scripts/start-dev.sh
+# or: uv run python scripts/start_dev.py
+```
+
+Opens the GUI in your default browser (`open` on macOS) once Vite is ready. Use `--no-browser` to skip.
+
+**Manual** (two terminals):
+
+```bash
+# Terminal 1 — API (default port 5001 in config)
+uv run python main.py server
+
+# Terminal 2 — UI (proxies /api → API port via KGS_API_PORT)
+cd gui && npm install && KGS_API_PORT=5001 npm run dev
 ```
 
 Open http://localhost:5173. See [gui/README.md](gui/README.md) for build and route details.
+
+On macOS, port 5000 is often taken by AirPlay Receiver; the default API port is **5001** to avoid that conflict.
 
 ## Documentation
 

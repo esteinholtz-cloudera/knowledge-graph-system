@@ -384,9 +384,9 @@ def _review_entity_retyping(
 
 
 def _wikidata_search(term: str, mode: str) -> List[Dict]:
-    hits = search_wikidata(term, mode)
+    hits, err = search_wikidata(term, mode)
     if not hits and mode != "disabled":
-        print(f"  [Wikidata] no results for '{term}'")
+        print(f"  [Wikidata] no results for '{term}'" + (f" ({err})" if err else ""))
     return hits
 
 

@@ -135,6 +135,7 @@ export interface SuggestPlacementResponse {
   wikidata_parents: WikidataHit[];
   parent_choices?: WikidataParentChoice[];
   selected_wikidata_qid?: string | null;
+  wikidata_error?: string | null;
 }
 
 export interface PredicateMapping {

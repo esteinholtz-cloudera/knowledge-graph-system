@@ -7,8 +7,10 @@ React + TypeScript web UI for the knowledge graph API.
 1. API server running:
 
 ```bash
-uv run python main.py server --port 5000
+uv run python main.py server
 ```
+
+Default API port is **5001** (`n8n.port` in `config/config.yaml`).
 
 2. Node.js 18+
 
@@ -20,9 +22,9 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 — Vite proxies `/api` to the Flask server on port 5000.
+Open http://localhost:5173 — Vite proxies `/api` to the Flask server (default port **5001**).
 
-To use a different API port, edit `gui/vite.config.ts` proxy target.
+To use a different API port, set `n8n.port` in `config/config.yaml` and pass `KGS_API_PORT` when starting Vite (or use `./scripts/start-dev.sh`).
 
 TypeScript interfaces in `src/api/types.ts` mirror the API; see [../docs/INFOMODEL.md](../docs/INFOMODEL.md) for the full information model and endpoint mapping.
 
@@ -33,7 +35,7 @@ npm run build
 npm run preview
 ```
 
-Set `VITE_API_BASE=http://127.0.0.1:5000/api/v1` if the UI is not served behind the same origin as the API.
+Set `VITE_API_BASE=http://127.0.0.1:5001/api/v1` if the UI is not served behind the same origin as the API.
 
 ## Screens
 
