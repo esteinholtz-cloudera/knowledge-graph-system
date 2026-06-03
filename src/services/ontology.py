@@ -16,6 +16,7 @@ from src.ontology.review_helpers import (
 )
 from src.ontology.sub_taxonomy_service import (
     approve_sub_taxonomy,
+    diagnose_sub_taxonomy_proposal,
     get_sub_taxonomy_proposal,
     list_sub_taxonomy_proposals,
     sub_taxonomy_from_class_uri,
@@ -90,6 +91,16 @@ class OntologyService:
         store = self._store(ontology_dir)
         bundle = get_sub_taxonomy_proposal(store, proposal_id)
         return bundle.to_dict() if bundle else None
+
+    def diagnose_sub_taxonomy(
+        self,
+        proposal_id: str,
+        ontology_dir: str = "data/ontology",
+    ) -> Dict[str, Any]:
+        store = self._store(ontology_dir)
+        diag = diagnose_sub_taxonomy_proposal(store, proposal_id)
+        diag["project_root"] = str(self.project_root)
+        return diag
 
     def update_sub_taxonomy(
         self,
@@ -201,8 +212,12 @@ class OntologyService:
         if not proposal:
             raise KeyError(f"proposal not found: {class_uri}")
         term = search_term or proposal.get("label", "")
-        hits = search_wikidata(term, self._wikidata_mode())
-        return {"search_term": term, "wikidata_hits": hits[:10]}
+        hits, wd_err = search_wikidata(term, self._wikidata_mode())
+        return {
+            "search_term": term,
+            "wikidata_hits": hits[:10],
+            "wikidata_error": wd_err,
+        }
 
     def select_wikidata_entity(
         self,
@@ -248,6 +263,7 @@ class OntologyService:
         class_uri: str,
         ontology_dir: str = "data/ontology",
         search_term: Optional[str] = None,
+        ancestor_chain: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
         proposal = self.get_proposal(class_uri, ontology_dir)
         if not proposal:
@@ -269,7 +285,25 @@ class OntologyService:
             self._load_ontology_graph(ontology_dir),
             llm_client=llm_client,
             context=context,
+            ancestor_chain=ancestor_chain,
         )
+
+    def get_wikidata_p279_chain(
+        self,
+        qid: str,
+        max_depth: int = 12,
+        ontology_dir: str = "data/ontology",
+    ) -> Dict[str, Any]:
+        from src.ontology.review_helpers import normalize_wikidata_qid, parent_choices_from_wikidata, wikidata_p279_chain
+
+        clean = normalize_wikidata_qid(qid)
+        chain = wikidata_p279_chain(clean, self._wikidata_mode(), max_depth=max_depth)
+        ontology = self._load_ontology_graph(ontology_dir)
+        parent_choices = parent_choices_from_wikidata(
+            chain[1:] if len(chain) > 1 else [],
+            ontology,
+        )
+        return {"qid": clean, "chain": chain, "parent_choices": parent_choices}
 
     def get_wikidata_superclasses(self, qid: str, ontology_dir: str = "data/ontology") -> Dict[str, Any]:
         from src.ontology.review_helpers import normalize_wikidata_qid, parent_choices_from_wikidata, wikidata_superclasses

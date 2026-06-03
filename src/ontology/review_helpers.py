@@ -1,7 +1,7 @@
 """Pure helpers for ontology proposal review (no stdin/stdout)."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from rdflib import Graph
 from rdflib.namespace import RDFS
@@ -21,15 +21,25 @@ def resolve_parent_uri(raw: str) -> str:
     return ONT_BASE + raw.replace(" ", "_")
 
 
-def search_wikidata(term: str, mode: str = "subprocess") -> List[Dict[str, Any]]:
+def search_wikidata(
+    term: str,
+    mode: str = "subprocess",
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Search Wikidata; returns (hits, error_message_if_empty)."""
     if mode == "disabled":
-        return []
+        return [], "Wikidata is disabled in config (ontology.wikidata_mcp)"
     try:
         from .wikidata_client import WikidataClient
         with WikidataClient() as wd:
-            return wd.search_entity(term)
-    except Exception:
-        return []
+            hits = wd.search_entity(term)
+            if hits:
+                return hits, None
+            return [], (
+                "No Wikidata matches (API may be rate-limited — wait a minute and retry, "
+                "or try a shorter search term)"
+            )
+    except Exception as e:
+        return [], str(e)
 
 
 def wikidata_superclasses(qid: str, mode: str = "subprocess") -> List[Dict[str, Any]]:
@@ -39,6 +49,22 @@ def wikidata_superclasses(qid: str, mode: str = "subprocess") -> List[Dict[str, 
         from .wikidata_client import WikidataClient
         with WikidataClient() as wd:
             return wd.get_superclasses(qid)
+    except Exception:
+        return []
+
+
+def wikidata_p279_chain(
+    qid: str,
+    mode: str = "subprocess",
+    max_depth: int = 12,
+) -> List[Dict[str, Any]]:
+    """Recursive P279 ancestors from entity toward Wikidata root."""
+    if mode == "disabled":
+        return []
+    try:
+        from .wikidata_client import WikidataClient
+        with WikidataClient() as wd:
+            return wd.get_p279_chain(qid, max_depth=max_depth)
     except Exception:
         return []
 
@@ -57,11 +83,22 @@ def map_wikidata_parents(parents: List[Dict], ontology: Graph) -> Optional[str]:
     return None
 
 
+def _format_ancestor_context(ancestor_chain: Optional[List[Dict[str, Any]]]) -> str:
+    if not ancestor_chain:
+        return ""
+    parts = []
+    for node in ancestor_chain:
+        lbl = node.get("label") or node.get("qid") or "?"
+        parts.append(str(lbl))
+    return f"Taxonomy built so far (leaf → current): {' → '.join(parts)}."
+
+
 def suggest_parents(
     label: str,
     ontology: Graph,
     llm_client=None,
     context: str = "",
+    ancestor_chain: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Return LLM placement proposals and optional Wikidata search hits."""
     app_config = None
@@ -73,10 +110,13 @@ def suggest_parents(
     except Exception:
         pass
 
+    chain_ctx = _format_ancestor_context(ancestor_chain)
+    full_context = f"{chain_ctx} {context}".strip() if chain_ctx else context
+
     proposals: List[Dict] = []
     if llm_client:
         proposer = PlacementProposer(llm_client)
-        proposals = proposer.propose(label, ontology, context)
+        proposals = proposer.propose(label, ontology, full_context)
     else:
         proposals = [{
             "parent": "http://www.w3.org/2002/07/owl#Thing",
@@ -84,7 +124,11 @@ def suggest_parents(
             "reasoning": "No LLM available — defaulting to top-level class",
         }]
 
-    wikidata_hits = search_wikidata(label, wikidata_mode) if wikidata_mode != "disabled" else []
+    wikidata_error: Optional[str] = None
+    if wikidata_mode != "disabled":
+        wikidata_hits, wikidata_error = search_wikidata(label, wikidata_mode)
+    else:
+        wikidata_hits = []
     wikidata_parents: List[Dict] = []
     parent_choices: List[Dict] = []
     selected_qid: Optional[str] = None
@@ -101,6 +145,7 @@ def suggest_parents(
         "wikidata_parents": wikidata_parents,
         "parent_choices": parent_choices,
         "selected_wikidata_qid": selected_qid,
+        "wikidata_error": wikidata_error,
     }
 
 
@@ -175,8 +220,13 @@ def resolve_wikidata_parent_uri(
     if mapped:
         return mapped, None
 
-    label = parent_info["label"]
-    qid = parent_info["qid"]
+    label = parent_info.get("label") or ""
+    qid = parent_info.get("qid") or ""
+    if not qid:
+        # No Wikidata QID — derive an ontology URI directly from the label.
+        parent_uri = resolve_parent_uri(label)
+        return parent_uri, None
+
     new_uri = str(store.add_class(
         label=label,
         comment=f"Added via Wikidata P279 lookup (wd:{qid})",
@@ -217,11 +267,14 @@ def approve_with_wikidata_parent(
     class_uri: str,
     parent_info: Dict[str, Any],
     ontology: Graph,
+    *,
+    mark_approved: bool = True,
 ) -> Dict[str, Any]:
-    """Place proposal under a Wikidata P279 parent and approve."""
+    """Place proposal under a Wikidata P279 parent; optionally mark it approved."""
     parent_uri, new_pending = resolve_wikidata_parent_uri(parent_info, store, ontology)
     store.set_subclass_of(class_uri, parent_uri)
-    store.set_status(class_uri, "approved")
+    if mark_approved:
+        store.set_status(class_uri, "approved")
     store.save()
     proposal = None
     for cls in store.get_all():

@@ -95,20 +95,60 @@ def _ensure_retyping_leaf(
     store.save()
 
 
+def _bundle_class_uris(store: ProposalStore, proposal_id: str) -> set[str]:
+    return {
+        s for s in store.subjects_for_sub_taxonomy(proposal_id)
+        if s.startswith(ONT_BASE) and not s.startswith(f"{ONT_BASE}meta/")
+    }
+
+
 def _collect_classes_for_bundle(
     store: ProposalStore,
     proposal_id: str,
     already: set[str],
+    *,
+    pending_only: bool = True,
 ) -> List[ProposedClass]:
-    uris = {
-        s for s in store.subjects_for_sub_taxonomy(proposal_id)
-        if s.startswith(ONT_BASE) and not s.startswith(f"{ONT_BASE}meta/")
-    }
+    uris = _bundle_class_uris(store, proposal_id)
     classes: List[ProposedClass] = []
     for cls in store.get_all():
-        if cls["uri"] in uris and cls.get("status") == "pending" and cls["uri"] not in already:
-            classes.append(ProposedClass.from_class_dict(cls))
+        if cls["uri"] not in uris or cls["uri"] in already:
+            continue
+        status = cls.get("status")
+        if pending_only:
+            if status != "pending":
+                continue
+        elif status not in ("pending", "approved"):
+            continue
+        classes.append(ProposedClass.from_class_dict(cls))
     return classes
+
+
+def _retype_entry_for_bundle(
+    store: ProposalStore,
+    proposal_id: str,
+) -> Optional[Dict[str, Any]]:
+    retype_node = store.get_retype_node_for_bundle(proposal_id)
+    if not retype_node:
+        return None
+    for entry in store.get_needs_typing():
+        if entry["node"] == retype_node:
+            return entry
+    from rdflib import URIRef
+
+    from src.ontology.proposal_store import ENTITY_LABEL, ONT_META, PROPOSED_BY, SOURCE_TTL
+
+    node = URIRef(retype_node)
+    entity_uri = str(next(store._graph.objects(node, ONT_META.entityURI), ""))
+    if not entity_uri:
+        return None
+    return {
+        "node": retype_node,
+        "entity_uri": entity_uri,
+        "label": str(next(store._graph.objects(node, ENTITY_LABEL), "")),
+        "source_ttl": str(next(store._graph.objects(node, SOURCE_TTL), "")),
+        "proposed_by": str(next(store._graph.objects(node, PROPOSED_BY), "")),
+    }
 
 
 def _build_bundle(
@@ -183,10 +223,93 @@ def get_sub_taxonomy_proposal(
     store: ProposalStore,
     proposal_id: str,
 ) -> Optional[SubTaxonomyProposal]:
-    for bundle in list_sub_taxonomy_proposals(store):
-        if bundle.id == proposal_id:
-            return bundle
-    return None
+    _ensure_bundle_ids(store)
+    if not store.subjects_for_sub_taxonomy(proposal_id):
+        return None
+
+    already = store._ontology_class_uris()
+    ontology_uris = already | {"http://www.w3.org/2002/07/owl#Thing"}
+    retype = _retype_entry_for_bundle(store, proposal_id)
+    classes = _collect_classes_for_bundle(store, proposal_id, already, pending_only=False)
+    if not classes and not retype:
+        return None
+    return _build_bundle(store, proposal_id, retype, classes, ontology_uris)
+
+
+def diagnose_sub_taxonomy_proposal(
+    store: ProposalStore,
+    proposal_id: str,
+) -> Dict[str, Any]:
+    """Explain why a SubTaxonomyProposal id can or cannot be resolved."""
+    _ensure_bundle_ids(store)
+    subjects = store.subjects_for_sub_taxonomy(proposal_id)
+    already = store._ontology_class_uris()
+    class_uris = _bundle_class_uris(store, proposal_id)
+    retype = _retype_entry_for_bundle(store, proposal_id)
+
+    class_rows: List[Dict[str, Any]] = []
+    for cls in store.get_all():
+        if cls["uri"] not in class_uris:
+            continue
+        status = cls.get("status", "pending")
+        in_ontology = cls["uri"] in already
+        class_rows.append({
+            "uri": cls["uri"],
+            "label": cls["label"],
+            "status": status,
+            "in_ontology_ttl": in_ontology,
+            "counts_toward_lookup": (
+                not in_ontology and status in ("pending", "approved")
+            ),
+        })
+
+    listable = bool(get_sub_taxonomy_proposal(store, proposal_id))
+    pending_list_ids = {b.id for b in list_sub_taxonomy_proposals(store)}
+
+    if listable:
+        reason = "ok"
+    elif not subjects:
+        reason = "no_sub_taxonomy_id_match"
+    elif not class_rows and not retype:
+        reason = "subjects_without_classes_or_retype"
+    elif class_rows and not any(r["counts_toward_lookup"] for r in class_rows) and not retype:
+        if all(r["in_ontology_ttl"] for r in class_rows):
+            reason = "all_classes_already_in_ontology_ttl"
+        elif all(r["status"] == "rejected" for r in class_rows):
+            reason = "all_classes_rejected"
+        else:
+            reason = "no_active_classes"
+    elif retype and not class_rows:
+        reason = "needs_typing_without_leaf_class"
+    else:
+        reason = "unknown"
+
+    known_ids: set[str] = set()
+    for cls in store.get_all():
+        bid = store.get_sub_taxonomy_id(cls["uri"])
+        if bid:
+            known_ids.add(bid)
+    for entry in store.get_needs_typing():
+        bid = store.get_sub_taxonomy_id(entry["node"])
+        if bid:
+            known_ids.add(bid)
+
+    return {
+        "proposal_id": proposal_id,
+        "found": listable,
+        "reason": reason,
+        "in_pending_list": proposal_id in pending_list_ids,
+        "subject_count": len(subjects),
+        "subjects": subjects[:20],
+        "classes": class_rows,
+        "has_retype_entry": retype is not None,
+        "retype_entity_uri": (retype or {}).get("entity_uri"),
+        "leaf_class_uri": store.get_leaf_class_uri(retype["node"]) if retype else None,
+        "known_bundle_count": len(known_ids),
+        "proposal_file": str(store.proposal_file),
+        "ontology_file": str(store.ontology_file),
+        "proposal_file_exists": store.proposal_file.exists(),
+    }
 
 
 def update_sub_taxonomy_proposal(
@@ -237,7 +360,7 @@ def _apply_chain_to_leaf(
         return
     if len(chain) == 1 and chain[0].get("uri") and not chain[0].get("qid"):
         store.add_subclass_of(leaf_uri, chain[0]["uri"], source="manual")
-        store.set_status(leaf_uri, "approved")
+        store.save()
         return
     if len(chain) < 2:
         return
@@ -247,21 +370,39 @@ def _apply_chain_to_leaf(
         store.set_equivalent_class(leaf_uri, wikidata_entity_uri(clean))
 
     current_uri = leaf_uri
-    for parent_info in chain[1:]:
-        if parent_info.get("uri") and not parent_info.get("qid"):
-            store.add_subclass_of(current_uri, parent_info["uri"], source="manual")
-            store.set_status(current_uri, "approved")
-            break
-        result = approve_with_wikidata_parent(store, current_uri, parent_info, ontology)
-        if result.get("new_pending_class"):
-            new_uri = result["new_pending_class"]["uri"]
-            bid = store.get_sub_taxonomy_id(current_uri)
-            if bid:
-                store.set_sub_taxonomy_id(new_uri, bid)
-            current_uri = new_uri
-        else:
-            break
-    store.save()
+    # approve_with_wikidata_parent calls store.save() internally each iteration.
+    # Each new intermediate class gets a random SUB_TAXONOMY_ID from add_class();
+    # we overwrite it with the correct bundle ID immediately after.  The try/finally
+    # guarantees the corrective store.save() fires even if a later iteration raises,
+    # so on-disk state never has orphaned bundle IDs from an intermediate save.
+    try:
+        for parent_info in chain[1:]:
+            if not parent_info.get("qid"):
+                # No Wikidata QID → plain ontology reference (uri or label-derived).
+                # This covers both explicit ontology URIs and manual label entries.
+                target = parent_info.get("uri") or resolve_parent_uri(
+                    parent_info.get("label") or ""
+                )
+                store.add_subclass_of(
+                    current_uri, target,
+                    source=parent_info.get("source", "manual"),
+                )
+                break
+            result = approve_with_wikidata_parent(
+                store, current_uri, parent_info, ontology, mark_approved=False,
+            )
+            if result.get("new_pending_class"):
+                new_uri = result["new_pending_class"]["uri"]
+                bid = store.get_sub_taxonomy_id(current_uri)
+                if bid:
+                    # Fix the random UUID that add_class() wrote before the
+                    # intermediate save so the new class belongs to this bundle.
+                    store.set_sub_taxonomy_id(new_uri, bid)
+                current_uri = new_uri
+            else:
+                break
+    finally:
+        store.save()
 
 
 def _approve_bundle_classes(store: ProposalStore, proposal_id: str) -> int:
@@ -320,6 +461,13 @@ def approve_sub_taxonomy(
 
     bundle = get_sub_taxonomy_proposal(store, proposal_id)
     if not bundle:
+        diag = diagnose_sub_taxonomy_proposal(store, proposal_id)
+        logger.warning(
+            "sub-taxonomy proposal not found: %s reason=%s subjects=%s",
+            proposal_id,
+            diag.get("reason"),
+            diag.get("subject_count"),
+        )
         raise KeyError(f"sub-taxonomy proposal not found: {proposal_id}")
 
     if action == "reject":

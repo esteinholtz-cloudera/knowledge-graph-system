@@ -14,9 +14,12 @@ app = create_app(project_root)
 if __name__ == "__main__":
     import argparse
 
+    from src.config.settings import load_config
+
+    cfg = load_config(str(project_root / "config" / "config.yaml")).n8n
     parser = argparse.ArgumentParser(description="Knowledge Graph API Server")
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--host", default=cfg.host)
+    parser.add_argument("--port", type=int, default=cfg.port)
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
-    app.run(host=args.host, port=args.port, debug=args.debug)
+    app.run(host=args.host, port=args.port, debug=args.debug or cfg.debug)

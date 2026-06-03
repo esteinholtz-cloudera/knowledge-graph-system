@@ -11,16 +11,91 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 import sys
 import threading
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 _QID_RE = re.compile(r"Q\d+", re.IGNORECASE)
 _WIKIDATA_API = "https://www.wikidata.org/w/api.php"
+_WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
+_USER_AGENT = (
+    "KnowledgeGraphSystem/0.1 "
+    "(https://github.com/esteinholtz-cloudera/knowledge-graph-system; ontology-review)"
+)
+
+
+def _escape_sparql_literal(text: str) -> str:
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _sparql_json_query(sparql: str, retries: int = 3) -> List[Dict[str, Any]]:
+    """Run SPARQL on query.wikidata.org; return bindings as {var: {value: ...}} rows."""
+    data = urllib.parse.urlencode({"query": sparql}).encode()
+    last_err: Optional[Exception] = None
+    for attempt in range(retries):
+        req = urllib.request.Request(
+            _WIKIDATA_SPARQL,
+            data=data,
+            headers={
+                "User-Agent": _USER_AGENT,
+                "Accept": "application/sparql-results+json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                parsed = json.loads(resp.read().decode())
+            return parsed.get("results", {}).get("bindings", [])
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code == 429 and attempt < retries - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(1.0)
+                continue
+            raise
+    if last_err:
+        raise last_err
+    return []
+
+
+def _wikidata_api_get(params: Dict[str, str], retries: int = 3) -> Dict[str, Any]:
+    params = {**params, "format": "json"}
+    url = f"{_WIKIDATA_API}?{urllib.parse.urlencode(params)}"
+    last_err: Optional[Exception] = None
+    for attempt in range(retries):
+        req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code == 429 and attempt < retries - 1:
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            raise
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(1.0)
+                continue
+            raise
+    if last_err:
+        raise last_err
+    return {}
 
 
 def _qid_from_value(value: Any) -> str:
@@ -189,14 +264,9 @@ class WikidataClient:
     # Public API
     # ------------------------------------------------------------------
 
-    def search_entity(self, query: str) -> List[Dict[str, str]]:
-        """
-        Search for Wikidata entities matching `query`.
-        Returns list of {"qid", "label", "description"}.
-        """
+    def _search_via_mcp(self, query: str) -> List[Dict[str, str]]:
         raw = self._tool_call("search_entity", {"query": query})
         hits: List[Dict[str, str]] = []
-
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
@@ -214,12 +284,83 @@ class WikidataClient:
                     hits.append({"qid": qid, "label": "", "description": ""})
         except (json.JSONDecodeError, TypeError):
             pass
-
         if not hits:
             for qid in _QID_RE.findall(raw)[:5]:
                 hits.append({"qid": qid.upper(), "label": "", "description": ""})
+        return hits
 
-        return self._enrich_labels(hits[:5])
+    @staticmethod
+    def _search_via_wb_api(query: str) -> List[Dict[str, str]]:
+        data = _wikidata_api_get({
+            "action": "wbsearchentities",
+            "search": query,
+            "language": "en",
+            "type": "item",
+            "limit": "5",
+        })
+        hits = []
+        for item in data.get("search", []):
+            qid = item.get("id", "")
+            if qid.startswith("Q"):
+                hits.append({
+                    "qid": qid,
+                    "label": item.get("label", qid),
+                    "description": item.get("description", ""),
+                })
+        return hits
+
+    @staticmethod
+    def _search_via_sparql(query: str) -> List[Dict[str, str]]:
+        """EntitySearch via Wikidata Query Service (separate rate limit from www API)."""
+        escaped = _escape_sparql_literal(query)
+        sparql = f"""
+SELECT ?item ?itemLabel ?itemDescription WHERE {{
+  SERVICE wikibase:mwapi {{
+    bd:serviceParam wikibase:endpoint "www.wikidata.org" ;
+                     wikibase:api "EntitySearch" ;
+                     mwapi:search "{escaped}" ;
+                     mwapi:language "en" .
+    ?item wikibase:apiOutputItem mwapi:item .
+    ?itemLabel wikibase:apiLabel true .
+    ?itemDescription wikibase:apiDescription true .
+  }}
+}} LIMIT 5
+"""
+        hits = []
+        for row in _sparql_json_query(sparql):
+            uri = (row.get("item") or {}).get("value", "")
+            qid = _qid_from_value(uri)
+            if not qid:
+                continue
+            label = (row.get("itemLabel") or {}).get("value", qid)
+            desc = (row.get("itemDescription") or {}).get("value", "")
+            hits.append({"qid": qid, "label": label, "description": desc})
+        return hits
+
+    def search_entity(self, query: str) -> List[Dict[str, str]]:
+        """
+        Search for Wikidata entities matching `query`.
+        Returns list of {"qid", "label", "description"}.
+        Tries MCP, then wbsearchentities API, then Query Service EntitySearch.
+        """
+        errors: List[str] = []
+        for name, fn in (
+            ("MCP", lambda: self._search_via_mcp(query)),
+            ("API", lambda: self._search_via_wb_api(query)),
+            ("SPARQL", lambda: self._search_via_sparql(query)),
+        ):
+            try:
+                hits = fn()
+                if hits:
+                    enriched = self._enrich_labels(hits[:5])
+                    return enriched
+            except Exception as e:
+                msg = f"{name}: {e}"
+                errors.append(msg)
+                logger.warning("Wikidata search %s failed: %s", name, e)
+        if errors:
+            logger.warning("Wikidata search exhausted for %r: %s", query, "; ".join(errors))
+        return []
 
     @staticmethod
     def _parse_sparql_rows(raw: str) -> List[Dict]:
@@ -258,19 +399,13 @@ class WikidataClient:
         """Fetch English labels via the public Wikidata API (no MCP)."""
         if not qids:
             return {}
-        params = urllib.parse.urlencode({
-            "action": "wbgetentities",
-            "ids": "|".join(qids[:50]),
-            "props": "labels|descriptions",
-            "languages": "en",
-            "format": "json",
-        })
         try:
-            with urllib.request.urlopen(
-                f"{_WIKIDATA_API}?{params}",
-                timeout=12,
-            ) as resp:
-                data = json.loads(resp.read().decode())
+            data = _wikidata_api_get({
+                "action": "wbgetentities",
+                "ids": "|".join(qids[:50]),
+                "props": "labels|descriptions",
+                "languages": "en",
+            })
         except Exception:
             return {}
 
@@ -369,29 +504,93 @@ class WikidataClient:
             pass
         return {"label": entity_id, "description": ""}
 
+    def _superclasses_via_direct_sparql(self, qid: str) -> List[Dict[str, str]]:
+        sparql = _SUPERCLASS_SPARQL.format(qid=qid)
+        results = []
+        for row in _sparql_json_query(sparql):
+            parent_uri = (row.get("parent") or {}).get("value", "")
+            label = (row.get("parentLabel") or {}).get("value", "")
+            qid_part = _qid_from_value(parent_uri)
+            if qid_part:
+                results.append({
+                    "qid": qid_part,
+                    "label": label.strip() if label else "",
+                    "description": "",
+                })
+        return results
+
     def get_superclasses(self, qid: str) -> List[Dict[str, str]]:
         """
         Return immediate superclasses of `qid` via P279.
         Result: list of {"qid", "label"}.
         """
         sparql = _SUPERCLASS_SPARQL.format(qid=qid)
+        rows: List[Dict] = []
         try:
             raw = self._tool_call("execute_sparql", {"sparql_query": sparql})
             rows = self._parse_sparql_rows(raw)
-        except Exception:
-            return []
+        except Exception as e:
+            logger.warning("MCP P279 lookup failed for %s: %s", qid, e)
+            try:
+                return self._enrich_labels(self._superclasses_via_direct_sparql(qid))
+            except Exception as e2:
+                logger.warning("Direct SPARQL P279 failed for %s: %s", qid, e2)
+                return []
         results = []
         for row in rows:
             parent_uri = (row.get("parent") or {}).get("value", "")
             label = (row.get("parentLabel") or {}).get("value", "")
-            qid_part = parent_uri.split("/")[-1] if "/" in parent_uri else parent_uri
+            qid_part = _qid_from_value(parent_uri)
             if qid_part:
                 results.append({
-                    "qid": qid_part.upper(),
+                    "qid": qid_part,
                     "label": label.strip() if label else "",
                     "description": "",
                 })
+        if not results:
+            try:
+                results = self._superclasses_via_direct_sparql(qid)
+            except Exception:
+                pass
         return self._enrich_labels(results)
+
+    def get_p279_chain(self, qid: str, max_depth: int = 12) -> List[Dict[str, str]]:
+        """Walk P279 recursively from `qid` toward root.
+
+        Returns ordered list [entity, parent, grandparent, …] (leaf first).
+        Stops at max_depth, cycles, or when no P279 parents exist.
+        When multiple parents exist, picks the first with a non-empty label.
+        """
+        start = _qid_from_value(qid)
+        if not start:
+            return []
+
+        meta = self.get_metadata(start)
+        chain: List[Dict[str, str]] = [{
+            "qid": start,
+            "label": meta.get("label") or start,
+            "description": meta.get("description", ""),
+        }]
+        visited = {start}
+        current = start
+
+        for _ in range(max_depth):
+            parents = self.get_superclasses(current)
+            if not parents:
+                break
+            parent = next((p for p in parents if p.get("label")), parents[0])
+            pqid = _qid_from_value(parent.get("qid", ""))
+            if not pqid or pqid in visited:
+                break
+            visited.add(pqid)
+            chain.append({
+                "qid": pqid,
+                "label": parent.get("label") or pqid,
+                "description": parent.get("description", ""),
+            })
+            current = pqid
+
+        return chain
 
 
 def wikidata_search(query: str, cmd: Optional[List[str]] = None) -> List[Dict[str, str]]:
@@ -404,3 +603,9 @@ def wikidata_superclasses(qid: str, cmd: Optional[List[str]] = None) -> List[Dic
     """Convenience function: get P279 superclasses for a QID."""
     with WikidataClient(cmd=cmd) as wd:
         return wd.get_superclasses(qid)
+
+
+def wikidata_p279_chain(qid: str, max_depth: int = 12, cmd: Optional[List[str]] = None) -> List[Dict[str, str]]:
+    """Convenience: recursive P279 chain from entity toward root."""
+    with WikidataClient(cmd=cmd) as wd:
+        return wd.get_p279_chain(qid, max_depth=max_depth)

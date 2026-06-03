@@ -61,6 +61,26 @@ def test_sub_taxonomy_api_approve_reject(tmp_path):
     assert reject.get_json()["action"] == "reject"
 
 
+def test_sub_taxonomy_not_found_includes_details(tmp_path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    _setup_ontology(tmp_path)
+
+    missing_id = "00000000-0000-0000-0000-000000000000"
+    resp = client.get(f"/api/v1/ontology/sub-taxonomy/{missing_id}")
+    assert resp.status_code == 404
+    body = resp.get_json()
+    assert body["error"]["message"] == "proposal not found"
+    details = body["error"]["details"]
+    assert details["proposal_id"] == missing_id
+    assert details["reason"] == "no_sub_taxonomy_id_match"
+    assert details["found"] is False
+
+    diag = client.get(f"/api/v1/ontology/sub-taxonomy/{missing_id}/diagnose")
+    assert diag.status_code == 200
+    assert diag.get_json()["reason"] == "no_sub_taxonomy_id_match"
+
+
 def test_patch_proposal(tmp_path):
     app = create_app(tmp_path)
     app.config["TESTING"] = True
