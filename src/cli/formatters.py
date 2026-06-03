@@ -1,5 +1,12 @@
 """Human-readable CLI output for service results."""
-from src.services.models import OntologyStatusResult, PipelineResult, PrecheckResult
+from src.services.models import (
+    ArchiveResult,
+    NormalizeApplyResult,
+    NormalizeScanResult,
+    OntologyStatusResult,
+    PipelineResult,
+    PrecheckResult,
+)
 
 
 def print_precheck(result: PrecheckResult) -> bool:
@@ -83,3 +90,33 @@ def print_ontology_status(status: OntologyStatusResult) -> None:
             print(f"  ... and {len(status.needs_typing) - 10} more")
     if status.pending or status.needs_typing:
         print(f"\nRun: python main.py ontology review")
+
+
+def print_archive_result(result: ArchiveResult) -> None:
+    print(f"Archiving data/ → {result.archive_path} ...")
+    print("  Copied (excluding benchmark.duckdb)")
+    print(f"  Updated {result.paths_updated} path(s) in metadata.json")
+    print(f"  Updated schema:url in {result.ttl_files_updated} TTL file(s)")
+    print("  Cleared data/ and recreated empty subdirectories")
+    print("  Restored ontology.ttl to data/ontology/")
+    print(f"\nArchive complete: {result.archive_path}")
+    print("The benchmark database remains at: data/benchmark.duckdb")
+
+
+def print_normalize_scan(result: NormalizeScanResult, map_path: str) -> None:
+    print(f"\n  {result.group_count} predicate groups found, {result.review_count} with variants to review")
+    print(f"  Written to: {result.map_path}")
+    print(f"\nNext: review {map_path}, set 'reviewed: true', then run normalize apply")
+
+
+def print_normalize_apply(result: NormalizeApplyResult, ontology_file: str, graphs: int) -> None:
+    if result.dry_run:
+        print("Dry run — showing changes without writing files:")
+    verb = "Would rewrite" if result.dry_run else "Rewrote"
+    print(f"  {verb} {result.triples} triple(s) in {result.files} file(s)")
+    if not result.dry_run:
+        print(f"  owl:subPropertyOf declarations added to {ontology_file}")
+        if graphs:
+            print(f"  Regenerated {graphs} graph HTML file(s)")
+        else:
+            print("  No existing graph HTML files to regenerate (use --with-graph on process)")
