@@ -14,7 +14,14 @@ if _VENV_PYTHON.exists() and Path(sys.executable).resolve() != _VENV_PYTHON.reso
 
 import argparse
 
-from src.cli.formatters import print_ontology_status, print_pipeline_summary, print_precheck
+from src.cli.formatters import (
+    print_archive_result,
+    print_normalize_apply,
+    print_normalize_scan,
+    print_ontology_status,
+    print_pipeline_summary,
+    print_precheck,
+)
 from src.config.settings import load_config
 from src.extraction.entity_extractor import ExtractionError
 from src.services import (
@@ -29,7 +36,6 @@ from src.services import (
 )
 
 _PROJECT_ROOT = Path(__file__).parent
-
 
 def main():
     parser = argparse.ArgumentParser(description="Knowledge Graph System")
@@ -115,14 +121,7 @@ def main():
         except FileExistsError as e:
             print(str(e))
             sys.exit(1)
-        print(f"Archiving data/ → {result.archive_path} ...")
-        print("  Copied (excluding benchmark.duckdb)")
-        print(f"  Updated {result.paths_updated} path(s) in metadata.json")
-        print(f"  Updated schema:url in {result.ttl_files_updated} TTL file(s)")
-        print("  Cleared data/ and recreated empty subdirectories")
-        print("  Restored ontology.ttl to data/ontology/")
-        print(f"\nArchive complete: {result.archive_path}")
-        print("The benchmark database remains at: data/benchmark.duckdb")
+        print_archive_result(result)
 
     elif args.command == "ontology":
         ont_svc = OntologyService(_PROJECT_ROOT)
@@ -146,18 +145,10 @@ def main():
                 print("ontology.ttl not found.")
         elif args.ont_command == "diagnose":
             import json
-            import re as _re
-            raw = args.proposal_id
-            # Accept full review URLs — extract the trailing UUID/id segment.
-            _uuid_match = _re.search(
-                r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
-                raw,
-                _re.I,
-            )
-            proposal_id = _uuid_match.group(1) if _uuid_match else raw
-            if proposal_id != raw:
-                print(f"(extracted id from URL: {proposal_id})\n")
-            print(json.dumps(ont_svc.diagnose_sub_taxonomy(proposal_id), indent=2))
+            result = ont_svc.diagnose_sub_taxonomy(args.proposal_id)
+            if note := result.pop("_url_extracted", None):
+                print(f"(extracted id from URL: {note})\n")
+            print(json.dumps(result, indent=2))
         else:
             ont_p.print_help()
 
@@ -175,27 +166,15 @@ def main():
                     print("  LLM available — will suggest canonical mappings")
                 except Exception:
                     print("  LLM unavailable — using string similarity only")
-            r = norm_svc.scan(kg, mp, no_llm=args.no_llm)
-            print(f"\n  {r.group_count} predicate groups found, {r.review_count} with variants to review")
-            print(f"  Written to: {r.map_path}")
-            print(f"\nNext: review {r.map_path}, set 'reviewed: true', then run normalize apply")
+            print_normalize_scan(norm_svc.scan(kg, mp, no_llm=args.no_llm), mp)
         elif args.norm_command == "apply":
             try:
                 r = norm_svc.apply(kg, ont, mp, dry_run=args.dry_run)
             except (FileNotFoundError, ValueError) as e:
                 print(str(e))
                 return
-            if args.dry_run:
-                print("Dry run — showing changes without writing files:")
-            verb = "Would rewrite" if r.dry_run else "Rewrote"
-            print(f"  {verb} {r.triples} triple(s) in {r.files} file(s)")
-            if not r.dry_run:
-                print(f"  owl:subPropertyOf declarations added to {ont}")
-                n = norm_svc.regenerate_graphs(kg)
-                if n:
-                    print(f"  Regenerated {n} graph HTML file(s)")
-                else:
-                    print("  No existing graph HTML files to regenerate (use --with-graph on process)")
+            n = norm_svc.regenerate_graphs(kg) if not r.dry_run else 0
+            print_normalize_apply(r, ont, n)
         elif args.norm_command == "review":
             norm_svc.run_interactive_review(mp)
         else:

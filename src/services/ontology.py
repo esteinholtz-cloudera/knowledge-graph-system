@@ -97,9 +97,19 @@ class OntologyService:
         proposal_id: str,
         ontology_dir: str = "data/ontology",
     ) -> Dict[str, Any]:
+        import re as _re
+
+        raw = proposal_id
+        m = _re.search(
+            r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+            raw, _re.I,
+        )
+        resolved = m.group(1) if m else raw
         store = self._store(ontology_dir)
-        diag = diagnose_sub_taxonomy_proposal(store, proposal_id)
+        diag = diagnose_sub_taxonomy_proposal(store, resolved)
         diag["project_root"] = str(self.project_root)
+        if resolved != raw:
+            diag["_url_extracted"] = resolved
         return diag
 
     def update_sub_taxonomy(
