@@ -126,6 +126,16 @@ class CliProgressReporter:
             for hint in payload.get("hints", []):
                 print(f"  • {hint}")
             return
+        if kind == "llm_error":
+            width = payload.get("width", 50)
+            print(f"\n{'═' * width}")
+            print(f"  LLM ERROR — chunk {payload.get('chunk_num')}/{payload.get('total_chunks')}")
+            print(f"{'═' * width}")
+            print(payload.get("detail", ""))
+            print("\nHints:")
+            for hint in payload.get("hints", []):
+                print(f"  • {hint}")
+            return
         if kind == "proposals":
             proposals = payload.get("proposals", [])
             if not proposals:

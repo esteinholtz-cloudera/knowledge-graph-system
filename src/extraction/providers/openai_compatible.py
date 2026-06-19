@@ -6,6 +6,8 @@ from typing import List, Optional
 
 import httpx
 
+from src.extraction.llm_errors import LLMError, llm_error_from_exception
+
 from .base import LLMProviderBase
 
 
@@ -93,31 +95,34 @@ class OpenAICompatibleProvider(LLMProviderBase):
         reasoning_content = ""
         token_count = 0
 
-        with httpx.Client(timeout=self.timeout_seconds) as client:
-            with client.stream("POST", url, json=body, headers=headers) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data = line[6:]
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        delta = chunk["choices"][0].get("delta", {})
-                        token = delta.get("content") or ""
-                        reasoning_token = delta.get("reasoning_content") or ""
-                        if token:
-                            content += token
-                            token_count += 1
-                        if reasoning_token:
-                            reasoning_content += reasoning_token
-                            token_count += 1
-                        pct = min(99, token_count * 100 // max_new_tokens)
-                        sys.stderr.write(f"\r{label} {pct:3d}%  ")
-                        sys.stderr.flush()
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as client:
+                with client.stream("POST", url, json=body, headers=headers) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data = line[6:]
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                            delta = chunk["choices"][0].get("delta", {})
+                            token = delta.get("content") or ""
+                            reasoning_token = delta.get("reasoning_content") or ""
+                            if token:
+                                content += token
+                                token_count += 1
+                            if reasoning_token:
+                                reasoning_content += reasoning_token
+                                token_count += 1
+                            pct = min(99, token_count * 100 // max_new_tokens)
+                            sys.stderr.write(f"\r{label} {pct:3d}%  ")
+                            sys.stderr.flush()
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
+        except httpx.HTTPError as exc:
+            raise llm_error_from_exception(exc, self.base_url) from exc
 
         sys.stderr.write(f"\r{label} 100%\n")
         sys.stderr.flush()
@@ -130,5 +135,9 @@ class OpenAICompatibleProvider(LLMProviderBase):
         result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL).strip()
 
         if not result:
-            raise ValueError("LLM returned empty content")
+            raise LLMError(
+                "LLM server not responsive — received an empty response. "
+                "The model may have crashed or stopped generating (common when LM Studio "
+                "runs out of memory or the server restarts mid-request)."
+            )
         return result

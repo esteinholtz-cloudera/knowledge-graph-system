@@ -3,10 +3,12 @@ import re
 import html
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
+from collections import defaultdict
 from rdflib import Graph
 from rdflib.namespace import RDF
 from urllib.parse import unquote
 from src.storage.rdf_utils import KG, DOC, ONT
+from src.document.markup_anchors import entity_markup_anchor
 
 
 class HTMLMarkupGenerator:
@@ -312,32 +314,39 @@ class HTMLMarkupGenerator:
         # (to preserve indices)
         result = []
         last_pos = 0
-        
+        occurrence_by_key: Dict[str, int] = defaultdict(int)
+
         for match in matches:
             # Add text before match
             before_text = text[last_pos:match['start']]
             result.append(self._preserve_formatting(html.escape(before_text)))
-            
+
             # Add marked-up entity
             entity_name = match['entity_name']
             entity_data = match['entity_data']
             entity_type = entity_data.get('type', 'Other')
             entity_uri = entity_data.get('uri', '')
             matched_text = match['matched_text']
-            
+            anchor_key = entity_uri or entity_name
+            occurrence = occurrence_by_key[anchor_key]
+            occurrence_by_key[anchor_key] += 1
+            anchor_id = entity_markup_anchor(entity_uri, entity_name, occurrence)
+
             # Get color for entity type
             color = self.ENTITY_COLORS.get(entity_type, self.ENTITY_COLORS['Other'])
-            
+
             # Create span with badge
             span_class = f"entity-{entity_type.lower().replace(' ', '-')}"
-            
+
             # If entity has URI, make it a link
             entity_text = html.escape(matched_text)
             if entity_uri:
                 entity_text = f'<a href="{html.escape(entity_uri)}" target="_blank" title="Entity URI: {html.escape(entity_uri)}" style="text-decoration: none; color: inherit;">{entity_text}</a>'
-            
+
             marked_entity = (
-                f'<span class="entity {span_class}" style="background-color: {color}20; '
+                f'<span id="{html.escape(anchor_id)}" class="entity {span_class}" '
+                f'data-entity-uri="{html.escape(entity_uri)}" data-occurrence="{occurrence}" '
+                f'style="background-color: {color}20; '
                 f'border-left: 3px solid {color}; padding: 2px 4px; position: relative;">'
                 f'{entity_text}'
                 f'<span class="entity-badge" style="background-color: {color}; color: white; '
@@ -346,7 +355,7 @@ class HTMLMarkupGenerator:
                 f'</span>'
             )
             result.append(marked_entity)
-            
+
             last_pos = match['end']
         
         # Add remaining text
@@ -598,6 +607,31 @@ class HTMLMarkupGenerator:
             <div class="document-text">{marked_text}</div>
         </div>
     </div>
+    <script>
+    (function() {{
+        function scrollHighlight(el) {{
+            if (!el) return;
+            el.scrollIntoView({{ behavior: "smooth", block: "center" }});
+            el.style.outline = "3px solid #f39c12";
+            el.style.outlineOffset = "2px";
+        }}
+        var hash = location.hash;
+        if (hash && hash.length > 1) {{
+            scrollHighlight(document.getElementById(decodeURIComponent(hash.slice(1))));
+            return;
+        }}
+        var find = new URLSearchParams(location.search).get("find");
+        if (!find) return;
+        var spans = document.querySelectorAll(".entity");
+        var needle = find.toLowerCase();
+        for (var i = 0; i < spans.length; i++) {{
+            if (spans[i].textContent.toLowerCase().indexOf(needle) >= 0) {{
+                scrollHighlight(spans[i]);
+                break;
+            }}
+        }}
+    }})();
+    </script>
 </body>
 </html>"""
         
@@ -649,9 +683,10 @@ class HTMLMarkupGenerator:
         items = []
         for entity_name, entity_data in sorted(entities.items()):
             entity_type = entity_data.get('type', 'Other')
+            anchor = entity_markup_anchor(entity_data.get('uri', ''), entity_name, 0)
             items.append(
                 f'<li>'
-                f'<span class="entity-name">{html.escape(entity_name)}</span> '
+                f'<a href="#{html.escape(anchor)}" class="entity-name">{html.escape(entity_name)}</a> '
                 f'<span class="entity-type">({html.escape(entity_type)})</span>'
                 f'</li>'
             )

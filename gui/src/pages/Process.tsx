@@ -16,6 +16,16 @@ function progressPercent(events: ProgressEvent[]): number {
   return Math.round((last.chunk / last.total_chunks) * 100);
 }
 
+function progressFailureMessage(ev: ProgressEvent): string | null {
+  const kind = ev.payload?.kind;
+  if (kind === "llm_error" || kind === "extraction_error" || ev.stage === "error") {
+    const detail = ev.payload?.detail;
+    if (typeof detail === "string" && detail) return detail;
+    if (ev.message) return ev.message;
+  }
+  return null;
+}
+
 export function Process() {
   const [domains, setDomains] = useState<string[]>(["default"]);
   const [domain, setDomain] = useState("default");
@@ -61,6 +71,13 @@ export function Process() {
       subscribeJobEvents(job_id, {
         onProgress: (ev) => {
           setEvents((prev) => [...prev, ev]);
+          const failure = progressFailureMessage(ev);
+          if (failure) {
+            setError(failure);
+            setStatus("failed");
+            setBusy(false);
+            return;
+          }
           setStatus(ev.stage);
         },
         onDone: (res) => {

@@ -23,6 +23,7 @@ from src.ontology.sub_taxonomy_service import (
     update_sub_taxonomy_proposal,
 )
 from src.services.artifacts import ArtifactService
+from src.services.markup_link import MarkupLinkService
 from src.services.models import ApproveOntologyResult, OntologyStatusResult
 
 
@@ -91,6 +92,34 @@ class OntologyService:
         store = self._store(ontology_dir)
         bundle = get_sub_taxonomy_proposal(store, proposal_id)
         return bundle.to_dict() if bundle else None
+
+    def get_sub_taxonomy_markup_link(
+        self,
+        proposal_id: str,
+        ontology_dir: str = "data/ontology",
+    ) -> Dict[str, Any]:
+        store = self._store(ontology_dir)
+        bundle = get_sub_taxonomy_proposal(store, proposal_id)
+        if not bundle:
+            return {
+                "available": False,
+                "reason": "proposal not found",
+            }
+        leaf = bundle.leaf_class_uri
+        class_comment = ""
+        if leaf:
+            for cls in bundle.proposed_classes:
+                if cls.uri == leaf:
+                    class_comment = cls.comment
+                    break
+        return MarkupLinkService(self.project_root).resolve_for_proposal(
+            entity_uri=bundle.entity_uri,
+            entity_label=bundle.label,
+            source_ttl=bundle.source_ttl,
+            proposed_by=bundle.proposed_by,
+            class_comment=class_comment,
+            leaf_class_uri=leaf,
+        ).to_dict()
 
     def diagnose_sub_taxonomy(
         self,

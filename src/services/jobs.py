@@ -141,7 +141,8 @@ class JobRunner:
                 self._store.update_status(job_id, "cancelled")
             except Exception as exc:
                 if self._store.get(job_id) and self._store.get(job_id).status != "cancelled":
-                    self._store.update_status(job_id, "failed", error=str(exc))
+                    from src.extraction.llm_errors import job_error_message
+                    self._store.update_status(job_id, "failed", error=job_error_message(exc))
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()

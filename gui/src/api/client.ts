@@ -2,6 +2,7 @@ import type {
   AppConfig,
   DocumentRecord,
   Job,
+  MarkupLinkResponse,
   OntologyProposal,
   PipelineRequest,
   PrecheckResponse,
@@ -115,15 +116,14 @@ export function subscribeJobEvents(jobId: string, handlers: JobEventHandlers): (
     source.close();
   });
 
-  source.addEventListener("error", (ev) => {
-    if (ev instanceof MessageEvent && ev.data) {
-      try {
-        const data = JSON.parse(ev.data) as { message?: string };
-        handlers.onError(data.message || "job failed");
-      } catch {
-        handlers.onError("job failed");
-      }
+  source.addEventListener("job_failed", (ev) => {
+    try {
+      const data = JSON.parse(ev.data) as { message?: string };
+      handlers.onError(data.message || "job failed");
+    } catch {
+      handlers.onError("job failed");
     }
+    source.close();
   });
 
   source.addEventListener("cancelled", () => {
@@ -185,6 +185,10 @@ export function updateOntologyProposal(
 
 export function getSubTaxonomy(proposalId: string): Promise<SubTaxonomyProposal> {
   return request(`/ontology/sub-taxonomy/${encodeURIComponent(proposalId)}`);
+}
+
+export function getSubTaxonomyMarkupLink(proposalId: string): Promise<MarkupLinkResponse> {
+  return request(`/ontology/sub-taxonomy/${encodeURIComponent(proposalId)}/markup-link`);
 }
 
 export function diagnoseSubTaxonomy(proposalId: string): Promise<Record<string, unknown>> {
