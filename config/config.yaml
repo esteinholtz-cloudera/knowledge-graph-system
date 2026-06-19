@@ -38,11 +38,13 @@ llm:
   use_few_shot: false
   model_settings:
     qwen3-30b-a3b-instruct-2507-mlx:
-      chunk_size: 300
+      # ~350-word calibrated prompt; keep workload modest to stay within ~500-word budget.
+      chunk_size: 200
+      overlap: 50
       section_size: 5
       disable_thinking: true
       format_strictness: low   # good instruction follower, low is fine
-      use_few_shot: false
+      use_few_shot: true       # domain few-shot in entity.user.prefix.txt
     gemma-4-26b-a4b-it-mlx:
       chunk_size: 400
       section_size: 4
