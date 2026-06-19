@@ -10,6 +10,7 @@ from src.document.html_markup import HTMLMarkupGenerator
 from src.document.processor import DocumentProcessor
 from src.extraction.entity_extractor import EntityExtractor, ExtractionError
 from src.extraction.entity_resolver import EntityResolver
+from src.extraction.llm_errors import LLMError
 from src.extraction.relationship_extractor import RelationshipExtractor
 from src.services.artifacts import ArtifactService
 from src.services.jobs import JobCancelled
@@ -23,6 +24,37 @@ from src.services.progress import (
 from src.storage.benchmark_store import create_benchmark_store
 from src.storage.metadata_store import MetadataStore
 from src.storage.turtle_writer import TurtleWriter
+
+
+_LLM_ERROR_HINTS = [
+    "Ensure LM Studio (or your configured LLM server) is running with a model loaded",
+    "Restart the LLM server if it crashed or ran out of memory",
+    "Use max chunks = 1 to test a single chunk before a full run",
+]
+
+
+def _emit_llm_failure(
+    reporter: ProgressReporter,
+    exc: Exception,
+    *,
+    chunk_num: int,
+    total_chunks: int,
+    kind: str,
+    hints: Optional[List[str]] = None,
+) -> None:
+    reporter.emit(ProgressEvent(
+        stage="error",
+        chunk=chunk_num,
+        total_chunks=total_chunks,
+        message=str(exc),
+        payload={
+            "kind": kind,
+            "chunk_num": chunk_num,
+            "total_chunks": total_chunks,
+            "detail": str(exc),
+            "hints": hints or _LLM_ERROR_HINTS,
+        },
+    ))
 
 
 @dataclass
@@ -149,6 +181,9 @@ class PipelineService:
                 ctx, all_triples, unique_entities, entity_result.entities_raw,
             )
         except ExtractionError:
+            ctx.bench.close()
+            raise
+        except LLMError:
             ctx.bench.close()
             raise
 
@@ -289,20 +324,27 @@ class PipelineService:
                     progress_label=f"chunk {chunk_num}/{total_chunks} · entities",
                 )
             except ExtractionError as exc:
-                ctx.reporter.emit(ProgressEvent(
-                    stage="error",
-                    payload={
-                        "kind": "extraction_error",
-                        "chunk_num": chunk_num,
-                        "total_chunks": total_chunks,
-                        "detail": str(exc),
-                        "hints": [
-                            "Set disable_thinking: true in config.yaml for thinking models",
-                            "Try a different model or adjust the entity extraction prompt",
-                            "Use --max-chunks 1 to isolate which chunk fails",
-                        ],
-                    },
-                ))
+                _emit_llm_failure(
+                    ctx.reporter,
+                    exc,
+                    chunk_num=chunk_num,
+                    total_chunks=total_chunks,
+                    kind="extraction_error",
+                    hints=[
+                        "Set disable_thinking: true in config.yaml for thinking models",
+                        "Try a different model or adjust the entity extraction prompt",
+                        "Use --max-chunks 1 to isolate which chunk fails",
+                    ],
+                )
+                raise
+            except LLMError as exc:
+                _emit_llm_failure(
+                    ctx.reporter,
+                    exc,
+                    chunk_num=chunk_num,
+                    total_chunks=total_chunks,
+                    kind="llm_error",
+                )
                 raise
 
         def on_done(index: int, entities: List[dict], elapsed: float) -> None:
@@ -419,11 +461,21 @@ class PipelineService:
 
         def rel_work(index: int, chunk: str) -> List[dict]:
             chunk_num = index + 1
-            return ctx.relationship_extractor.extract(
-                chunk,
-                canonical_names,
-                progress_label=f"chunk {chunk_num}/{total_chunks} · relationships",
-            )
+            try:
+                return ctx.relationship_extractor.extract(
+                    chunk,
+                    canonical_names,
+                    progress_label=f"chunk {chunk_num}/{total_chunks} · relationships",
+                )
+            except LLMError as exc:
+                _emit_llm_failure(
+                    ctx.reporter,
+                    exc,
+                    chunk_num=chunk_num,
+                    total_chunks=total_chunks,
+                    kind="llm_error",
+                )
+                raise
 
         def rel_on_done(index: int, triples: List[dict], elapsed: float) -> None:
             chunk_num = index + 1

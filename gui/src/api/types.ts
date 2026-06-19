@@ -94,6 +94,14 @@ export interface SubTaxonomyProposal {
   created_at?: string;
 }
 
+export interface MarkupLinkResponse {
+  available: boolean;
+  document_id?: string | null;
+  anchor?: string | null;
+  entity_label?: string | null;
+  reason?: string | null;
+}
+
 /** @deprecated use SubTaxonomyProposal — kept for transitional typing */
 export interface OntologyProposal {
   id?: string;
@@ -149,4 +157,5 @@ export interface PredicateMapping {
 export interface TableData {
   columns: string[];
   rows: unknown[][];
+  available?: boolean;
 }

@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from src.extraction.entity_extractor import ExtractionError
+from src.extraction.llm_errors import LLMError, job_error_message
 from src.services.health import HealthService
 from src.services.jobs import JobCancelled, JobStore
 from src.services.models import PipelineOptions
@@ -45,6 +46,7 @@ def execute_pipeline_job(job_id: str, params: Dict[str, Any], store: JobStore, p
         ))
     except JobCancelled:
         raise
-    except ExtractionError as exc:
-        store.update_status(job_id, "failed", error=str(exc))
-        reporter.emit(ProgressEvent(stage="error", message=str(exc)))
+    except (ExtractionError, LLMError) as exc:
+        message = job_error_message(exc)
+        store.update_status(job_id, "failed", error=message)
+        reporter.emit(ProgressEvent(stage="error", message=message))

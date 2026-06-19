@@ -22,14 +22,14 @@ def job_events_stream(
 
         job = store.get(job_id)
         if not job:
-            yield f"event: error\ndata: {json.dumps({'message': 'job not found'})}\n\n"
+            yield f"event: job_failed\ndata: {json.dumps({'message': 'job not found'})}\n\n"
             break
 
         if job.status in TERMINAL_STATUSES:
             if job.status == "succeeded" and job.result:
                 yield f"event: done\ndata: {json.dumps(job.result)}\n\n"
             elif job.status == "failed":
-                yield f"event: error\ndata: {json.dumps({'message': job.error or 'failed'})}\n\n"
+                yield f"event: job_failed\ndata: {json.dumps({'message': job.error or 'failed'})}\n\n"
             elif job.status == "cancelled":
                 yield f"event: cancelled\ndata: {json.dumps({'message': 'cancelled'})}\n\n"
             break

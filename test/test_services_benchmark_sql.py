@@ -8,7 +8,7 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from src.services.benchmark import validate_readonly_sql
+from src.services.benchmark import _relation_to_table, validate_readonly_sql
 
 
 def test_validate_select_ok():
@@ -23,3 +23,12 @@ def test_validate_rejects_insert():
 def test_validate_rejects_multi_statement():
     with pytest.raises(ValueError, match="multi-statement"):
         validate_readonly_sql("SELECT 1; SELECT 2")
+
+
+def test_relation_to_table_without_pandas():
+    """Uses DuckDB fetchall(), not fetchdf(), so numpy/pandas are not required."""
+    duckdb = pytest.importorskip("duckdb")
+    rel = duckdb.sql("SELECT 1 AS n, 'x' AS s")
+    table = _relation_to_table(rel)
+    assert table.columns == ["n", "s"]
+    assert table.rows == [[1, "x"]]

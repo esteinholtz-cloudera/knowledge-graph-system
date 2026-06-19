@@ -55,6 +55,14 @@ def get_sub_taxonomy(proposal_id):
     return jsonify(proposal), 200
 
 
+@ontology_bp.route("/ontology/sub-taxonomy/<proposal_id>/markup-link", methods=["GET"])
+def sub_taxonomy_markup_link(proposal_id):
+    link = _svc().get_sub_taxonomy_markup_link(proposal_id)
+    if not link.get("available") and link.get("reason") == "proposal not found":
+        return _proposal_not_found(proposal_id)
+    return jsonify(link), 200
+
+
 @ontology_bp.route("/ontology/sub-taxonomy/<proposal_id>/diagnose", methods=["GET"])
 def diagnose_sub_taxonomy(proposal_id):
     return jsonify(_svc().diagnose_sub_taxonomy(proposal_id)), 200

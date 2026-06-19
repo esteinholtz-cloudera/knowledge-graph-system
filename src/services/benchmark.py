@@ -2,7 +2,11 @@
 import re
 from typing import Any, Dict, List, Optional
 
-from src.storage.benchmark_store import BenchmarkStore, create_benchmark_store
+from src.storage.benchmark_store import (
+    BenchmarkStore,
+    _DUCKDB_AVAILABLE,
+    create_benchmark_store,
+)
 from src.services.models import TableResult
 
 
@@ -28,13 +32,9 @@ def validate_readonly_sql(sql: str) -> str:
 def _relation_to_table(rel) -> TableResult:
     if rel is None:
         return TableResult(columns=[], rows=[], text="")
-    try:
-        df = rel.fetchdf()
-        columns = [str(c) for c in df.columns]
-        rows = df.values.tolist()
-        return TableResult(columns=columns, rows=rows, text=str(rel))
-    except Exception:
-        return TableResult(columns=[], rows=[], text=str(rel))
+    columns = [str(c) for c in rel.columns]
+    rows = [list(row) for row in rel.fetchall()]
+    return TableResult(columns=columns, rows=rows, text=str(rel))
 
 
 class BenchmarkService:
@@ -69,4 +69,8 @@ class BenchmarkService:
         bench.close()
 
     def as_json(self, table: TableResult) -> Dict[str, Any]:
-        return {"columns": table.columns, "rows": table.rows}
+        return {
+            "columns": table.columns,
+            "rows": table.rows,
+            "available": _DUCKDB_AVAILABLE,
+        }

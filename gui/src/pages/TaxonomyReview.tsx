@@ -3,13 +3,15 @@ import { Link, useParams } from "react-router-dom";
 import {
   ApiError,
   approveSubTaxonomy,
+  artifactUrl,
   getSubTaxonomy,
+  getSubTaxonomyMarkupLink,
   getWikidataP279Chain,
   getWikidataSuperclasses,
   searchWikidata,
   suggestPlacement,
 } from "../api/client";
-import type { SubTaxonomyProposal, SuggestPlacementResponse } from "../api/types";
+import type { MarkupLinkResponse, SubTaxonomyProposal, SuggestPlacementResponse } from "../api/types";
 import { TaxonomyChainViz } from "../components/TaxonomyChainViz";
 import type { ChainNode, LevelState, WikidataChainNode } from "./taxonomyTypes";
 import { syncTaxonomyVisualizer } from "./TaxonomyVisualizer";
@@ -69,6 +71,7 @@ function ProposalGroup({ title, children }: { title: string; children: React.Rea
 export function TaxonomyReview() {
   const { proposalId } = useParams<{ proposalId: string }>();
   const [proposal, setProposal] = useState<SubTaxonomyProposal | null>(null);
+  const [markupLink, setMarkupLink] = useState<MarkupLinkResponse | null>(null);
   const [chain, setChain] = useState<ChainNode[]>([]);
   // history[i] = LevelState that was current when chain[i] was selected.
   // Invariant: history.length === chain.length.
@@ -161,6 +164,10 @@ export function TaxonomyReview() {
     try {
       const p = await getSubTaxonomy(proposalId);
       setProposal(p);
+      const link = await getSubTaxonomyMarkupLink(proposalId).catch(
+        (): MarkupLinkResponse => ({ available: false, reason: "markup link unavailable" }),
+      );
+      setMarkupLink(link);
       setChain([]);
       setHistory([]);
       setEntityQid(null);
@@ -185,6 +192,17 @@ export function TaxonomyReview() {
     if (!proposalId) return;
     const url = `${window.location.origin}/ontology/review/${encodeURIComponent(proposalId)}/visualize`;
     window.open(url, `taxonomy-${proposalId}`, "width=480,height=720,scrollbars=yes");
+  }
+
+  function openMarkup() {
+    if (!markupLink?.available || !markupLink.document_id) return;
+    const base = artifactUrl(markupLink.document_id, "markup");
+    const suffix = markupLink.anchor
+      ? `#${encodeURIComponent(markupLink.anchor)}`
+      : markupLink.entity_label
+        ? `?find=${encodeURIComponent(markupLink.entity_label)}`
+        : "";
+    window.open(`${base}${suffix}`, "_blank", "noopener,noreferrer");
   }
 
   // Extend the top of the chain with a new parent node (normal, unfocused flow).
@@ -482,6 +500,18 @@ export function TaxonomyReview() {
         <div className="form-row">
           <button type="button" onClick={openVisualizer} disabled={!proposal}>
             Open visualization window
+          </button>
+          <button
+            type="button"
+            onClick={openMarkup}
+            disabled={!markupLink?.available}
+            title={
+              markupLink?.available
+                ? markupLink.reason ?? "Open markup at entity location"
+                : markupLink?.reason ?? "Markup not available for this proposal"
+            }
+          >
+            Markup
           </button>
           <button type="button" onClick={loadProposal} disabled={loading}>
             Refresh

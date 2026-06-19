@@ -77,12 +77,11 @@ class DocumentService:
 
     def artifact_path(self, document_id: str, kind: str) -> Optional[str]:
         meta = self._store.get_document(document_id)
-        if not meta:
-            return None
         if kind == "kg":
-            kg = meta.get("kg_path")
-            if kg and Path(kg).exists():
-                return kg
+            if meta:
+                kg = meta.get("kg_path")
+                if kg and Path(kg).exists():
+                    return kg
             candidate = self.project_root / "data" / "knowledge_graphs" / f"{document_id}.ttl"
             return str(candidate) if candidate.exists() else None
         stem = document_id

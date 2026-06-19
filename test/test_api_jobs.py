@@ -63,6 +63,7 @@ def test_pipeline_job_sse_done(mock_execute, client, tmp_path):
     assert "event: progress" in body
     assert "entities" in body
     assert "event: done" in body
+    assert "event: job_failed" not in body
 
     job_resp = client.get(f"/api/v1/jobs/{job_id}")
     assert job_resp.get_json()["status"] == "succeeded"

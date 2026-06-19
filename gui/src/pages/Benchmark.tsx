@@ -41,7 +41,11 @@ export function Benchmark() {
         {!table ? (
           <p className="muted">Loading…</p>
         ) : table.rows.length === 0 ? (
-          <p className="muted">No data (install benchmark extra: uv sync --extra benchmark)</p>
+          <p className="muted">
+            {table.available === false
+              ? "Benchmark storage unavailable (install extra: uv sync --extra benchmark)"
+              : "No benchmark data yet — run the pipeline to record metrics"}
+          </p>
         ) : (
           <table>
             <thead>
