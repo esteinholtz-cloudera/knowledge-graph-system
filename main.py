@@ -22,8 +22,9 @@ from src.cli.formatters import (
     print_pipeline_summary,
     print_precheck,
 )
-from src.config.settings import load_config
+from src.config.settings import DomainSettings, load_config
 from src.extraction.entity_extractor import ExtractionError
+from src.extraction.prompt_store import FALLBACK_MODEL, PromptStore
 from src.services import (
     ArchiveService,
     BenchmarkService,
@@ -89,6 +90,23 @@ def main():
     bm_query = bm_sub.add_parser("query")
     bm_query.add_argument("sql")
     bm_sub.add_parser("clear")
+
+    pr_p = subparsers.add_parser("prompts", help="Manage extraction prompt files")
+    pr_sub = pr_p.add_subparsers(dest="pr_command")
+    pr_reg = pr_sub.add_parser(
+        "regenerate",
+        help="Write concrete prompt instances to prompts/{model}/{domain}/",
+    )
+    pr_reg.add_argument("--model", default=None, help="Model name (default: _default)")
+    pr_reg.add_argument("--domain", default=None, help="Domain profile (default: default)")
+    pr_reg.add_argument(
+        "--all",
+        action="store_true",
+        help="Regenerate _default + all model_settings models and all domains",
+    )
+    pr_reg.add_argument("--force", action="store_true", help="Overwrite existing prompt files")
+    pr_list = pr_sub.add_parser("list", help="List prompt instances on disk")
+    pr_list.add_argument("--model", default=None, help="Filter to one model directory")
 
     args = parser.parse_args()
 
@@ -191,6 +209,54 @@ def main():
             print("Benchmark data cleared.")
         else:
             bm_p.print_help()
+
+    elif args.command == "prompts":
+        store = PromptStore(_PROJECT_ROOT)
+        config = load_config(str(_PROJECT_ROOT / "config" / "config.yaml"))
+        domain_settings = {"default": DomainSettings(), **config.domains}
+
+        if args.pr_command == "regenerate":
+            if args.all:
+                models = [FALLBACK_MODEL, *sorted(config.llm.model_settings.keys())]
+                domains = ["default", *sorted(config.domains.keys())]
+            else:
+                models = [args.model or FALLBACK_MODEL]
+                domains = [args.domain or "default"]
+            results = store.regenerate(
+                models,
+                domains,
+                config.llm,
+                domain_settings,
+                force=args.force,
+            )
+            total = sum(len(paths) for by_domain in results.values() for paths in by_domain.values())
+            if total == 0:
+                print("No prompt files written (already exist — use --force to overwrite).")
+            else:
+                for model, by_domain in results.items():
+                    for domain, paths in by_domain.items():
+                        for path in paths:
+                            print(f"  wrote {path.relative_to(_PROJECT_ROOT)}")
+                print(
+                    f"\nWrote {total} prompt file(s). Edit under prompts/{{model}}/{{domain}}/, "
+                    "then run process as usual."
+                )
+        elif args.pr_command == "list":
+            models = [args.model] if args.model else store.list_models()
+            if not models:
+                print("No prompt files found. Run: python main.py prompts regenerate --all")
+            else:
+                for model in models:
+                    domains = store.list_domains(model)
+                    if not domains:
+                        continue
+                    print(f"{model}/")
+                    for domain in domains:
+                        print(f"  {domain}/")
+                        for path in store.list_files(model, domain):
+                            print(f"    {path.name}")
+        else:
+            pr_p.print_help()
     else:
         parser.print_help()
 

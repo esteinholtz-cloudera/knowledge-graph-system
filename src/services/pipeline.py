@@ -11,6 +11,7 @@ from src.document.processor import DocumentProcessor
 from src.extraction.entity_extractor import EntityExtractor, ExtractionError
 from src.extraction.entity_resolver import EntityResolver
 from src.extraction.llm_errors import LLMError
+from src.extraction.prompt_store import PromptStore
 from src.extraction.relationship_extractor import RelationshipExtractor
 from src.services.artifacts import ArtifactService
 from src.services.jobs import JobCancelled
@@ -218,10 +219,16 @@ class PipelineService:
             llm_client=entity_extractor.llm_client,
             llm_cfg=llm_cfg,
             domain=domain_cfg,
+            domain_name=options.domain,
+            model_name=resolved_model,
+            prompt_store=PromptStore(self.project_root),
         )
         relationship_extractor = self._relationship_extractor_factory(
             llm_cfg=llm_cfg,
             domain=domain_cfg,
+            domain_name=options.domain,
+            model_name=resolved_model,
+            prompt_store=PromptStore(self.project_root),
         )
 
         processor = self._document_processor_factory(

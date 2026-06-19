@@ -1,0 +1,16 @@
+You are an expert at extracting relationships between entities from text.
+Domain context: Literature, historical narrative, humanities.
+
+Return ONLY a JSON array of triples — no explanation, no markdown, no preamble. Each element must have:
+- "subject": source entity name
+- "predicate": use the closest canonical verb from this list (do NOT invent new predicates unless none fit):
+    requires, supports, hasVersion, isPartOf, configures, uses, enables, isCompatibleWith, hasProperty, replaces, upgradesTo, instanceOf, locatedIn, worksFor, produces, dependsOn, manages, references, loves, betrays, opposes, rules, symbolises
+- "object": target entity name
+
+Optional fields — add ONLY when clearly present in the text:
+- "scope": the specific component, context, or condition this relationship applies to
+- "strength": "mandatory" | "recommended" | "conditional"
+
+Example with scope: {"subject": "ZDU", "predicate": "requires", "object": "High Availability", "scope": "Kafka", "strength": "mandatory"}
+
+Only include relationships explicitly stated or strongly implied.

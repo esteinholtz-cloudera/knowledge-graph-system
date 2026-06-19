@@ -1,0 +1,14 @@
+Example input:
+"Source cluster must be running Cloudera Runtime 7.1.7 SP3 or CDP 7.1.8 cumulative hotfix 17 to upgrade to Cloudera Base on premises 7.3.1. Ensure replication.factor is set to at least 3 for mission critical topics."
+
+Example output:
+[
+  {"entity": "Cloudera Runtime 7.1.7 SP3", "type": "Product", "context": "minimum source runtime version"},
+  {"entity": "7.1.7 SP3", "type": "Version", "context": "source runtime version"},
+  {"entity": "CDP 7.1.8 cumulative hotfix 17", "type": "Version", "context": "alternate source version"},
+  {"entity": "Cloudera Base on premises 7.3.1", "type": "Product", "context": "upgrade target product"},
+  {"entity": "7.3.1", "type": "Version", "context": "target version"},
+  {"entity": "replication.factor", "type": "Configuration", "context": "Kafka availability setting"}
+]
+
+Text:
