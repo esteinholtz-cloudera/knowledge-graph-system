@@ -38,9 +38,9 @@ llm:
   use_few_shot: false
   model_settings:
     qwen3-30b-a3b-instruct-2507-mlx:
-      # ~350-word calibrated prompt; keep workload modest to stay within ~500-word budget.
-      chunk_size: 200
-      overlap: 50
+      # ~350-word calibrated prompt; workload 100 keeps total budget ~450 words.
+      chunk_size: 100
+      overlap: 25
       section_size: 5
       disable_thinking: true
       format_strictness: low   # good instruction follower, low is fine

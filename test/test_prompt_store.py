@@ -97,3 +97,23 @@ def test_load_falls_back_to_builder_when_files_missing(tmp_path):
         domain=domain,
     )
     assert loaded == expected
+
+
+def test_snapshot_for_run_reads_all_six_files(tmp_path):
+    store = PromptStore(tmp_path)
+    llm_cfg = LLMSettings(chunk_size=120, overlap=30, section_size=3)
+    domain = DomainSettings(description="Ops docs")
+    store.write_instance("m1", "technical", llm_cfg, domain, force=True)
+
+    snapshot = store.snapshot_for_run(
+        model_name="m1",
+        domain_name="technical",
+        llm_cfg=llm_cfg,
+        domain=domain,
+    )
+
+    assert snapshot["domain"] == "technical"
+    assert snapshot["chunk_size"] == 120
+    assert snapshot["overlap"] == 30
+    assert len(snapshot["files"]) == 6
+    assert "entity.system.txt" in snapshot["files"]

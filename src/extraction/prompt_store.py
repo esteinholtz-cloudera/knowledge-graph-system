@@ -1,8 +1,9 @@
 """Load and regenerate concrete extraction prompts from disk (per model + domain)."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from .prompt_layout import UserPromptLayout
 
@@ -114,6 +115,67 @@ class PromptStore:
         if directory is not None:
             return self._load_bundle(directory, task="relationship")
         return build_relationship_prompt_bundle(llm_cfg, domain)
+
+    def read_all_files(self, directory: Path) -> Dict[str, str]:
+        """Read all six prompt files from a resolved instance directory."""
+        files: Dict[str, str] = {}
+        for filename in PROMPT_FILES.values():
+            path = directory / filename
+            if path.is_file():
+                files[filename] = path.read_text(encoding="utf-8")
+        return files
+
+    def snapshot_for_run(
+        self,
+        *,
+        model_name: str,
+        domain_name: str,
+        llm_cfg: "LLMSettings",
+        domain: "DomainSettings",
+    ) -> Dict[str, Any]:
+        """Capture prompts and chunk settings used for a pipeline run."""
+        from .prompt_builder import (
+            build_entity_prompt_bundle,
+            build_relationship_prompt_bundle,
+        )
+
+        directory = self._resolve_instance_dir(model_name, domain_name)
+        if directory is not None:
+            prompts_dir = str(directory.relative_to(self.project_root))
+            files = self.read_all_files(directory)
+        else:
+            prompts_dir = str(self.instance_dir(model_name, domain_name).relative_to(self.project_root))
+            entity_system, entity_user = build_entity_prompt_bundle(llm_cfg, domain)
+            rel_system, rel_user = build_relationship_prompt_bundle(llm_cfg, domain)
+            files = {
+                PROMPT_FILES["entity.system"]: entity_system,
+                PROMPT_FILES["entity.user.prefix"]: entity_user.prefix,
+                PROMPT_FILES["entity.user.suffix"]: entity_user.suffix,
+                PROMPT_FILES["relationship.system"]: rel_system,
+                PROMPT_FILES["relationship.user.prefix"]: rel_user.prefix,
+                PROMPT_FILES["relationship.user.suffix"]: rel_user.suffix,
+            }
+        return {
+            "prompts_dir": prompts_dir,
+            "domain": domain_name,
+            "llm_model": model_name,
+            "chunk_size": llm_cfg.chunk_size,
+            "overlap": llm_cfg.overlap,
+            "section_size": llm_cfg.section_size,
+            "files": files,
+        }
+
+    @staticmethod
+    def snapshot_to_json(snapshot: Dict[str, Any]) -> str:
+        return json.dumps(snapshot, ensure_ascii=False)
+
+    def write_snapshot_files(self, snapshot: Dict[str, Any]) -> Path:
+        """Write a stored run snapshot back to the prompts directory on disk."""
+        prompts_dir = self.project_root / snapshot["prompts_dir"]
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        for filename, content in snapshot["files"].items():
+            (prompts_dir / filename).write_text(content, encoding="utf-8")
+        return prompts_dir
 
     def write_instance(
         self,

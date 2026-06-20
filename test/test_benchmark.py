@@ -254,6 +254,57 @@ class TestEeJudgeEvaluation:
         assert len(rows) == 1
 
 
+class TestRunSnapshot:
+    def test_snapshot_stored_and_restored(self, store, tmp_path):
+        import json
+
+        snapshot = {
+            "prompts_dir": "prompts/test-model/technical",
+            "domain": "technical",
+            "llm_model": "test-model",
+            "chunk_size": 100,
+            "overlap": 25,
+            "section_size": 5,
+            "files": {
+                "entity.system.txt": "ENTITY SYSTEM",
+                "entity.user.prefix.txt": "PREFIX",
+                "entity.user.suffix.txt": "SUFFIX",
+                "relationship.system.txt": "REL SYSTEM",
+                "relationship.user.prefix.txt": "REL PREFIX",
+                "relationship.user.suffix.txt": "REL SUFFIX",
+            },
+        }
+        run_id = store.start_run(
+            document_filename="doc.txt",
+            document_id="doc",
+            word_count=100,
+            llm_provider="lmstudio",
+            llm_model="test-model",
+            resolution_enabled=False,
+            resolution_strategies=[],
+            run_snapshot_json=json.dumps(snapshot),
+        )
+        loaded = store.get_run_snapshot(run_id)
+        assert loaded == snapshot
+
+        prompts_dir = store.restore_run_snapshot(run_id, tmp_path)
+        assert prompts_dir == tmp_path / "prompts/test-model/technical"
+        assert (prompts_dir / "entity.system.txt").read_text(encoding="utf-8") == "ENTITY SYSTEM"
+
+    def test_restore_missing_snapshot_raises(self, store, tmp_path):
+        run_id = store.start_run(
+            document_filename="doc.txt",
+            document_id="doc",
+            word_count=100,
+            llm_provider="lmstudio",
+            llm_model="test-model",
+            resolution_enabled=False,
+            resolution_strategies=[],
+        )
+        with pytest.raises(ValueError, match="No prompt snapshot"):
+            store.restore_run_snapshot(run_id, tmp_path)
+
+
 # ---------------------------------------------------------------------------
 # NullBenchmarkStore tests (no duckdb required — always runs)
 # ---------------------------------------------------------------------------

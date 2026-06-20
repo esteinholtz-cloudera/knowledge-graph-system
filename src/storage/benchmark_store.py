@@ -17,10 +17,11 @@ resolution    — one row per resolution strategy per run
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 try:
     import duckdb
@@ -48,7 +49,8 @@ CREATE TABLE IF NOT EXISTS runs (
     llm_provider      TEXT,
     llm_model         TEXT,
     resolution_enabled BOOLEAN,
-    proposals         INTEGER
+    proposals         INTEGER,
+    run_snapshot_json TEXT
 );
 
 -- Normalized: one row per strategy per run (replaces CSV in runs.resolution_strategies)
@@ -136,6 +138,13 @@ CREATE TABLE IF NOT EXISTS ee_judge_evaluations (
 """
 
 
+def _migrate_runs_schema(con: "duckdb.DuckDBPyConnection") -> None:
+    """Add columns introduced after initial schema without recreating tables."""
+    existing = {row[0] for row in con.execute("DESCRIBE runs").fetchall()}
+    if "run_snapshot_json" not in existing:
+        con.execute("ALTER TABLE runs ADD COLUMN run_snapshot_json TEXT")
+
+
 class NullBenchmarkStore:
     """No-op implementation used when DuckDB is not installed."""
 
@@ -162,6 +171,12 @@ class NullBenchmarkStore:
 
     def update_ee_judge_prompts_after(self, *args, **kwargs):
         pass
+
+    def get_run_snapshot(self, run_id: str) -> Optional[Dict[str, Any]]:
+        return None
+
+    def restore_run_snapshot(self, run_id: str, project_root: Path) -> Path:
+        raise RuntimeError("Benchmark store unavailable — install duckdb extra")
 
     def query(self, sql: str):
         print("DuckDB not installed — benchmark queries unavailable.")
@@ -198,6 +213,7 @@ class BenchmarkStore:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._con = duckdb.connect(db_path)
         self._con.execute(_DDL)
+        _migrate_runs_schema(self._con)
 
     # ------------------------------------------------------------------
     # Run lifecycle
@@ -213,6 +229,7 @@ class BenchmarkStore:
         resolution_enabled: bool,
         resolution_strategies: list,
         max_chunks: Optional[int] = None,
+        run_snapshot_json: Optional[str] = None,
     ) -> str:
         run_id = str(uuid.uuid4())
         self._con.execute(
@@ -220,9 +237,9 @@ class BenchmarkStore:
             INSERT INTO runs (
                 run_id, started_at, document_filename, document_id,
                 word_count, max_chunks, llm_provider, llm_model,
-                resolution_enabled,
+                resolution_enabled, run_snapshot_json,
                 entities_raw, entities_resolved, triples, proposals
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0)
             """,
             [
                 run_id,
@@ -234,6 +251,7 @@ class BenchmarkStore:
                 llm_provider,
                 llm_model,
                 resolution_enabled,
+                run_snapshot_json,
             ],
         )
         # Strategies in normalized table — one row per strategy, ordered
@@ -451,6 +469,25 @@ class BenchmarkStore:
             [prompts_after, eval_id],
         )
 
+    def get_run_snapshot(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Return stored prompt/chunk snapshot for a run, or None if missing."""
+        row = self._con.execute(
+            "SELECT run_snapshot_json FROM runs WHERE run_id = ?",
+            [run_id],
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        return json.loads(row[0])
+
+    def restore_run_snapshot(self, run_id: str, project_root: Path) -> Path:
+        """Write stored prompt files back to disk for reproducibility."""
+        from src.extraction.prompt_store import PromptStore
+
+        snapshot = self.get_run_snapshot(run_id)
+        if snapshot is None:
+            raise ValueError(f"No prompt snapshot stored for run {run_id}")
+        return PromptStore(project_root).write_snapshot_files(snapshot)
+
     # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
@@ -488,6 +525,7 @@ class BenchmarkStore:
             proposals,
             round(elapsed_s, 1)                       AS elapsed_s,
             llm_model                                 AS model,
+            (run_snapshot_json IS NOT NULL)           AS snapshot,
             CASE WHEN resolution_enabled
                  THEN (SELECT string_agg(strategy, '→' ORDER BY position)
                        FROM run_strategies rs WHERE rs.run_id = r.run_id)

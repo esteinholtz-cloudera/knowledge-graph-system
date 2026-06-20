@@ -90,6 +90,11 @@ def main():
     bm_query = bm_sub.add_parser("query")
     bm_query.add_argument("sql")
     bm_sub.add_parser("clear")
+    bm_restore = bm_sub.add_parser(
+        "restore-run",
+        help="Restore prompt files and show chunk settings from a stored run snapshot",
+    )
+    bm_restore.add_argument("run_id", help="run_id from benchmark runs table")
 
     pr_p = subparsers.add_parser("prompts", help="Manage extraction prompt files")
     pr_sub = pr_p.add_subparsers(dest="pr_command")
@@ -207,6 +212,20 @@ def main():
         elif args.bm_command == "clear":
             bm.clear()
             print("Benchmark data cleared.")
+        elif args.bm_command == "restore-run":
+            try:
+                result = bm.restore_run(args.run_id, _PROJECT_ROOT)
+            except ValueError as e:
+                print(str(e))
+                sys.exit(1)
+            snap = result["snapshot"]
+            print(f"Restored prompts to {result['prompts_dir']}")
+            print(
+                f"Run settings: domain={snap['domain']} "
+                f"chunk_size={snap['chunk_size']} overlap={snap['overlap']} "
+                f"section_size={snap['section_size']}"
+            )
+            print("Update config.yaml model_settings to match chunk_size/overlap before re-running.")
         else:
             bm_p.print_help()
 

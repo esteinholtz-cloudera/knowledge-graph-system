@@ -256,6 +256,13 @@ class PipelineService:
         ))
 
         bench = create_benchmark_store()
+        prompt_store = PromptStore(self.project_root)
+        run_snapshot = prompt_store.snapshot_for_run(
+            model_name=resolved_model,
+            domain_name=options.domain,
+            llm_cfg=llm_cfg,
+            domain=domain_cfg,
+        )
         run_id = bench.start_run(
             document_filename=doc_data["filename"],
             document_id=document_id,
@@ -265,6 +272,7 @@ class PipelineService:
             resolution_enabled=app_config.entity_resolution.enabled,
             resolution_strategies=list(app_config.entity_resolution.strategies),
             max_chunks=options.max_chunks,
+            run_snapshot_json=PromptStore.snapshot_to_json(run_snapshot),
         )
 
         return _RunContext(
