@@ -83,15 +83,19 @@ def _run_upgrade(args) -> None:
         )
 
     result = run_upgrade_extraction(
-        sources, args.output, use_llm=not args.no_llm, on_progress=_on_progress,
+        sources, args.output, use_llm=not args.no_llm,
+        on_progress=_on_progress, resume=not args.restart,
     )
     print(
-        f"Pages processed: {result.pages} (skipped {result.skipped_duplicates} duplicate(s))\n"
+        f"Pages processed: {result.pages} "
+        f"(skipped {result.skipped_duplicates} duplicate(s), "
+        f"{result.already_done} already done)\n"
         f"Chunks: {result.chunks_gated} sent to LLM of {result.chunks_total} total "
         f"({result.chunks_total - result.chunks_gated} gated out, zero tokens)\n"
-        f"Facts: {result.fact_count} total — {result.table_facts} from tables, "
-        f"{result.llm_facts} from LLM (pre-dedupe)\n"
-        f"TTL written to: {result.output_path}"
+        f"Facts: {result.fact_count} total in TTL — {result.table_facts} from tables, "
+        f"{result.llm_facts} from LLM this run (pre-dedupe)\n"
+        f"TTL written to: {result.output_path}\n"
+        f"Progress manifest: {result.manifest_path or '(none)'}"
     )
 
 
@@ -187,6 +191,7 @@ def main():
     up_ext.add_argument("--urls-file", default=None, help="File of source URLs (one per line)")
     up_ext.add_argument("--input", action="append", default=[], help="Local HTML/text file (repeatable)")
     up_ext.add_argument("--no-llm", action="store_true", help="Deterministic tables only (zero tokens)")
+    up_ext.add_argument("--restart", action="store_true", help="Ignore saved progress; start a fresh run")
     up_ext.add_argument("--output", default="data/knowledge_graphs/upgrade.ttl")
 
     args = parser.parse_args()

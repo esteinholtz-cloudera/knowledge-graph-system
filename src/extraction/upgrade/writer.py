@@ -15,9 +15,18 @@ from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF, RDFS
 
 from ...storage.rdf_utils import DOC, KG, ONT, create_entity_uri, create_predicate_uri
-from .schema import ENTITY_OBJECT_PREDICATES, UpgradeFact, dedupe_facts
+from .schema import (
+    ENTITY_OBJECT_PREDICATES,
+    UPGRADE_PREDICATES,
+    UpgradeFact,
+    dedupe_facts,
+)
 
 _VERSION_HINT = re.compile(r"\d")
+
+# Predicate URIs that represent a core upgrade fact (used to count facts in a
+# graph loaded back from disk on resume).
+_UPGRADE_PRED_URIS = frozenset(create_predicate_uri(p) for p in UPGRADE_PREDICATES)
 
 
 def _type_uri(name: str) -> URIRef:
@@ -47,9 +56,15 @@ def _bind_namespaces(graph: Graph) -> None:
     graph.bind("rdfs", RDFS)
 
 
-def build_graph(facts: Iterable[UpgradeFact]) -> Graph:
+def new_graph() -> Graph:
+    """An empty, namespace-bound upgrade graph."""
     graph = Graph()
     _bind_namespaces(graph)
+    return graph
+
+
+def add_facts(graph: Graph, facts: Iterable[UpgradeFact]) -> Graph:
+    """Merge facts into ``graph``. Idempotent: re-adding a triple is a no-op."""
     for fact in dedupe_facts(facts):
         subj = _add_entity(graph, fact.subject, fact.source)
         pred = create_predicate_uri(fact.predicate)
@@ -61,16 +76,38 @@ def build_graph(facts: Iterable[UpgradeFact]) -> Graph:
     return graph
 
 
+def build_graph(facts: Iterable[UpgradeFact]) -> Graph:
+    return add_facts(new_graph(), facts)
+
+
+def load_graph(output_path: str) -> Graph:
+    """Load an existing TTL into a bound graph, or return a fresh one (resume)."""
+    graph = new_graph()
+    path = Path(output_path)
+    if path.exists():
+        graph.parse(str(path), format="turtle")
+    return graph
+
+
+def count_facts(graph: Graph) -> int:
+    """Number of core upgrade-fact triples currently in the graph."""
+    return sum(1 for _, predicate, _ in graph if predicate in _UPGRADE_PRED_URIS)
+
+
+def serialize_graph(graph: Graph, output_path: str) -> str:
+    """Atomically write ``graph`` to ``output_path`` (temp file + rename)."""
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    graph.serialize(destination=str(tmp_path), format="turtle")
+    os.replace(tmp_path, path)
+    return str(path)
+
+
 def write_upgrade_ttl(facts: Iterable[UpgradeFact], output_path: str) -> str:
     """Serialize deduped upgrade facts to ``output_path``; return that path.
 
     Writes to a temp file and atomically renames, so an interrupted incremental
     save can never leave a half-written TTL behind.
     """
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    graph = build_graph(facts)
-    tmp_path = path.with_name(path.name + ".tmp")
-    graph.serialize(destination=str(tmp_path), format="turtle")
-    os.replace(tmp_path, path)
-    return str(path)
+    return serialize_graph(build_graph(facts), output_path)

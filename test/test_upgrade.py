@@ -196,3 +196,47 @@ def test_runner_progress_reports_failed_source(tmp_path):
     )
     assert statuses == ["failed"]
     assert out.exists()  # a valid (empty) TTL is still written
+
+
+def test_runner_resume_skips_done_and_preserves_prior_facts(tmp_path):
+    a = tmp_path / "a.html"
+    a.write_text(_FROM_TO_HTML, encoding="utf-8")
+    b = tmp_path / "b.html"
+    b.write_text(_SECOND_HTML, encoding="utf-8")
+    out = tmp_path / "upgrade.ttl"
+
+    first = run_upgrade_extraction([str(a)], str(out), use_llm=False)
+    assert first.pages == 1
+    assert Path(str(out) + ".manifest.json").exists()
+    facts_after_first = first.fact_count
+    assert facts_after_first >= 2
+
+    statuses = []
+    second = run_upgrade_extraction(
+        [str(a), str(b)], str(out), use_llm=False,
+        on_progress=lambda p: statuses.append(p.status),
+    )
+    # `a` is recognised as already done; only `b` is processed this run.
+    assert statuses == ["skipped-done", "processed"]
+    assert second.already_done == 1
+    assert second.pages == 1
+    # Prior facts are preserved (merged), and new ones are added.
+    assert second.fact_count > facts_after_first
+    graph = Graph()
+    graph.parse(out, format="turtle")
+    assert len(graph) > 0
+
+
+def test_runner_restart_ignores_saved_progress(tmp_path):
+    a = tmp_path / "a.html"
+    a.write_text(_FROM_TO_HTML, encoding="utf-8")
+    out = tmp_path / "upgrade.ttl"
+    run_upgrade_extraction([str(a)], str(out), use_llm=False)
+
+    statuses = []
+    again = run_upgrade_extraction(
+        [str(a)], str(out), use_llm=False, resume=False,
+        on_progress=lambda p: statuses.append(p.status),
+    )
+    assert statuses == ["processed"]  # reprocessed, not skipped
+    assert again.already_done == 0

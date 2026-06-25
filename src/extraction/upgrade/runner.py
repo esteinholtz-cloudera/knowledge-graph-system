@@ -8,23 +8,27 @@ table pass did not already cover.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import httpx
+from rdflib import Graph
 
 from ...config.settings import load_config
 from .llm_pass import UpgradeLLMExtractor
-from .schema import UpgradeFact, dedupe_facts, gate_chunks
+from .schema import UpgradeFact, gate_chunks
 from .scoping import fetch_text, html_to_text, scope_urls
 from .tables import facts_from_html
-from .writer import write_upgrade_ttl
+from .writer import add_facts, count_facts, load_graph, new_graph, serialize_graph
 
 logger = logging.getLogger(__name__)
 
 _HTML_SUFFIXES = (".html", ".htm")
+_MANIFEST_SUFFIX = ".manifest.json"
 
 
 def _chunk_words(text: str, chunk_size: int, overlap: int) -> List[str]:
@@ -39,6 +43,7 @@ def _chunk_words(text: str, chunk_size: int, overlap: int) -> List[str]:
 @dataclass
 class UpgradeRunResult:
     output_path: str
+    manifest_path: str = ""
     pages: int = 0
     fact_count: int = 0
     table_facts: int = 0
@@ -46,6 +51,7 @@ class UpgradeRunResult:
     chunks_total: int = 0
     chunks_gated: int = 0
     skipped_duplicates: int = 0
+    already_done: int = 0  # sources skipped because a prior run finished them
     facts: List[UpgradeFact] = field(default_factory=list)
 
 
@@ -56,12 +62,39 @@ class UpgradeProgress:
     index: int          # 1-based position in the source list
     total: int          # total number of sources
     source: str         # the URL/file just handled
-    status: str         # "processed" | "skipped-duplicate" | "failed"
-    pages: int          # cumulative pages successfully processed
-    fact_count: int     # cumulative deduped facts written to the TTL so far
+    status: str         # processed | skipped-duplicate | skipped-done | failed
+    pages: int          # cumulative pages processed this run
+    fact_count: int     # cumulative facts in the TTL so far
 
 
 ProgressCallback = Callable[[UpgradeProgress], None]
+
+
+def _manifest_path(output_path: str) -> str:
+    return output_path + _MANIFEST_SUFFIX
+
+
+def _load_manifest(output_path: str) -> Dict[str, str]:
+    """Return the {source: content_hash} map of already-finished sources."""
+    path = Path(_manifest_path(output_path))
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return dict(data.get("processed", {}))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Ignoring unreadable manifest %s: %s", path, exc)
+        return {}
+
+
+def _save_manifest(output_path: str, processed: Dict[str, str]) -> str:
+    """Atomically persist the processed-source map (temp file + rename)."""
+    path = Path(_manifest_path(output_path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_text(json.dumps({"processed": processed}), encoding="utf-8")
+    os.replace(tmp_path, path)
+    return str(path)
 
 
 def _load_source(source: str, client: Optional[httpx.Client]) -> Optional[str]:
@@ -107,19 +140,20 @@ def _process_source(
     source: str,
     content: str,
     result: UpgradeRunResult,
-    all_facts: List[UpgradeFact],
+    graph: Graph,
     *,
     use_llm: bool,
     extractor: Optional[UpgradeLLMExtractor],
     chunk_size: int,
     overlap: int,
 ) -> None:
-    """Extract facts from one already-loaded source; append + update counters."""
+    """Extract facts from one source, merge into graph, update counters."""
     result.pages += 1
+    new_facts: List[UpgradeFact] = []
     if _is_html(source, content):
         table_facts = facts_from_html(content, source=source)
         result.table_facts += len(table_facts)
-        all_facts.extend(table_facts)
+        new_facts.extend(table_facts)
         text = html_to_text(content)
     else:
         text = content
@@ -128,14 +162,20 @@ def _process_source(
         result.llm_facts += len(facts)
         result.chunks_total += n_chunks
         result.chunks_gated += n_gated
-        all_facts.extend(facts)
+        new_facts.extend(facts)
+    add_facts(graph, new_facts)
 
 
-def _save_progress(result: UpgradeRunResult, all_facts: List[UpgradeFact], output_path: str) -> None:
-    """Dedupe accumulated facts and persist the TTL (called after each source)."""
-    result.facts = dedupe_facts(all_facts)
-    result.fact_count = len(result.facts)
-    result.output_path = write_upgrade_ttl(result.facts, output_path)
+def _persist(
+    graph: Graph,
+    processed: Dict[str, str],
+    output_path: str,
+    result: UpgradeRunResult,
+) -> None:
+    """Save TTL + manifest after a source and refresh the cumulative fact count."""
+    result.output_path = serialize_graph(graph, output_path)
+    result.manifest_path = _save_manifest(output_path, processed)
+    result.fact_count = count_facts(graph)
 
 
 def _emit(
@@ -162,12 +202,15 @@ def run_upgrade_extraction(
     overlap: Optional[int] = None,
     extractor: Optional[UpgradeLLMExtractor] = None,
     on_progress: Optional[ProgressCallback] = None,
+    resume: bool = True,
 ) -> UpgradeRunResult:
     """Run the funnel over URLs/files, saving the TTL after each source.
 
-    The cumulative, deduped TTL is rewritten after every processed source, so a
-    long crawl never loses completed work on interruption. ``on_progress`` (if
-    given) is called once per source with an overall ``index``/``total`` count.
+    The cumulative TTL is rewritten after every source and a sidecar manifest
+    (``<output>.manifest.json``) records finished sources by content hash. When
+    ``resume`` is True (default) a re-run loads both, skips sources already done
+    (including zero-fact pages, so they are not re-fetched), and merges new facts
+    into the existing graph. ``on_progress`` is called once per source.
     """
     cfg = load_config().llm
     chunk_size = chunk_size or cfg.chunk_size
@@ -176,32 +219,40 @@ def run_upgrade_extraction(
         extractor = UpgradeLLMExtractor()
 
     result = UpgradeRunResult(output_path=output_path)
-    seen_hashes: set = set()
-    all_facts: List[UpgradeFact] = []
+    processed = _load_manifest(output_path) if resume else {}
+    graph = load_graph(output_path) if resume else new_graph()
+    seen_hashes = set(processed.values())
+    result.fact_count = count_facts(graph)
     total = len(sources)
 
     with httpx.Client() as client:
         for index, source in enumerate(sources, start=1):
+            if source in processed:
+                result.already_done += 1
+                _emit(on_progress, index, total, source, "skipped-done", result)
+                continue
             content = _load_source(source, client)
             if content is None:
                 _emit(on_progress, index, total, source, "failed", result)
                 continue
             digest = hashlib.sha256(content.encode("utf-8", "ignore")).hexdigest()
+            processed[source] = digest  # record so resume never re-fetches it
             if digest in seen_hashes:
                 result.skipped_duplicates += 1
+                _persist(graph, processed, output_path, result)
                 _emit(on_progress, index, total, source, "skipped-duplicate", result)
                 continue
             seen_hashes.add(digest)
             _process_source(
-                source, content, result, all_facts,
+                source, content, result, graph,
                 use_llm=use_llm, extractor=extractor,
                 chunk_size=chunk_size, overlap=overlap,
             )
-            _save_progress(result, all_facts, output_path)  # incremental save
+            _persist(graph, processed, output_path, result)  # incremental save
             _emit(on_progress, index, total, source, "processed", result)
 
-    if result.pages == 0:
-        _save_progress(result, all_facts, output_path)  # always leave a valid TTL
+    if not Path(output_path).exists():
+        _persist(graph, processed, output_path, result)  # always leave a valid TTL
     result.output_path = output_path
     return result
 
