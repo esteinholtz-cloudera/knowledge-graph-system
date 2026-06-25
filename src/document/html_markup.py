@@ -126,7 +126,7 @@ class HTMLMarkupGenerator:
             if entity_uri_str not in entity_uris:
                 entity_uris.add(entity_uri_str)
                 entity_name = self._uri_to_entity_name(entity_uri_str)
-                
+
                 # Extract rdf:type if present (from ontology namespace)
                 entity_type = 'Other'  # Default
                 for s, p, o in graph.triples((entity_uri, RDF.type, None)):
@@ -136,7 +136,14 @@ class HTMLMarkupGenerator:
                         type_name = unquote(type_name)
                         entity_type = type_name
                         break
-                
+
+                # Skip pipeline artifacts (n-ary reification nodes) — not extractable entities.
+                if entity_type == 'QualifiedRelation':
+                    continue
+                local = entity_uri_str.replace(str(KG), '')
+                if local.startswith('rel_') or local.startswith('rel%5F'):
+                    continue
+
                 entities.append({
                     'entity': entity_name,
                     'uri': entity_uri_str,
@@ -209,14 +216,12 @@ class HTMLMarkupGenerator:
             if not entity_name or not entity_name.strip():
                 continue
             
-            entity_name = entity_name.strip()
+            entity_name = " ".join(entity_name.split())
             
-            # Escape special regex characters
-            escaped_name = re.escape(entity_name)
-            
-            # Use word boundaries to ensure we match whole words/phrases only
-            # \b matches at word boundaries (between word and non-word characters)
-            pattern_str = r'\b' + escaped_name + r'\b'
+            # Build a pattern that tolerates spacing and underscore drift between
+            # tokens: "ATLAS HOOK" matches ATLAS_HOOK, "7.1.9 SP1" matches extra spaces.
+            tokens = [re.escape(tok) for tok in entity_name.split(" ")]
+            pattern_str = r'\b' + r'[\s_]+'.join(tokens) + r'\b'
             
             # Case-insensitive search
             pattern = re.compile(pattern_str, re.IGNORECASE)
@@ -238,8 +243,12 @@ class HTMLMarkupGenerator:
                 if is_word_char(char_before) and is_word_char(char_after):
                     continue
                 
-                # Verify the matched text matches the entity name (case-insensitive)
-                if matched_text.lower() != entity_name.lower():
+                # Verify the match equals the entity name once case, spacing, and
+                # underscore drift are normalised away.
+                def _match_key(s: str) -> str:
+                    return re.sub(r"[\s_]+", " ", s).lower()
+
+                if _match_key(matched_text) != _match_key(entity_name):
                     continue
                 
                 matches.append({

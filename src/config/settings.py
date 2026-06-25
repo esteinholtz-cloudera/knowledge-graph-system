@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 
 LLMProvider = Literal["ollama", "lmstudio", "openai", "anthropic", "gemini"]
+ChunkStrategy = Literal["fixed", "recursive"]
 
 
 class ModelOverrides(BaseModel):
@@ -30,6 +31,7 @@ class ModelOverrides(BaseModel):
     """
     chunk_size: Optional[int] = None
     overlap: Optional[int] = None
+    chunk_strategy: Optional[ChunkStrategy] = None
     section_size: Optional[int] = None
     disable_thinking: Optional[bool] = None
     temperature: Optional[float] = None
@@ -79,7 +81,8 @@ class LLMSettings(BaseModel):
     # Default chunk settings — words per extraction call.
     # Override per model in model_settings below.
     chunk_size: int = 300
-    overlap: int = 100
+    overlap: int = 50
+    chunk_strategy: ChunkStrategy = "recursive"
     # Number of consecutive chunks to group into one section for Pass 2b
     # cross-section relationship extraction. 0 or 1 disables the section pass.
     section_size: int = 5

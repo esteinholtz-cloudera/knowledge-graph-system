@@ -24,7 +24,9 @@ llm:
   # Words per extraction call. Smaller = better coverage (avoids "lost in the middle"),
   # more LLM calls. Tune per model based on observed extraction quality.
   chunk_size: 300
-  overlap: 100
+  overlap: 50
+  # fixed = legacy word window; recursive = paragraph/sentence pack (recommended)
+  chunk_strategy: recursive
   # Chunks per section for Pass 2b cross-section relationship extraction.
   # 0 or 1 disables the section pass.
   section_size: 5
@@ -38,13 +40,14 @@ llm:
   use_few_shot: false
   model_settings:
     qwen3-30b-a3b-instruct-2507-mlx:
-      # ~350-word calibrated prompt; workload 100 keeps total budget ~450 words.
-      chunk_size: 100
-      overlap: 25
+      # Baseline: minimal ~100-word entity prompt; recursive 300/50 chunking.
+      chunk_size: 300
+      overlap: 50
+      chunk_strategy: recursive
       section_size: 5
       disable_thinking: true
       format_strictness: low   # good instruction follower, low is fine
-      use_few_shot: true       # domain few-shot in entity.user.prefix.txt
+      use_few_shot: false
     gemma-4-26b-a4b-it-mlx:
       chunk_size: 400
       section_size: 4
@@ -170,3 +173,20 @@ domains:
       - causedBy
       - treatedBy
       - expressedIn
+
+  # Narrow profile for the token-conservative `upgrade` funnel (see
+  # src/extraction/upgrade/). Deliberately tiny so the constrained LLM prompt
+  # stays small: only product/version entities and upgrade-relevant predicates.
+  upgrade:
+    description: "Product upgrade paths, supported versions, prerequisites, deprecations"
+    extra_entity_types:
+      - Product
+      - SoftwareVersion
+    extra_predicates:
+      - upgradesTo            # source version -> reachable target version
+      - supportedUpgradeFrom  # target version -> supported source version
+      - requiresPrerequisite  # version -> prerequisite (literal or entity)
+      - deprecatedIn          # feature/version -> version it was deprecated in
+      - removedIn             # feature/version -> version it was removed in
+      - isCompatibleWith      # version/product -> compatible version/product
+      - versionOf             # version -> product

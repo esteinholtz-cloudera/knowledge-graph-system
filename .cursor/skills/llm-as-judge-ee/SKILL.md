@@ -25,6 +25,7 @@ Resolve `{model}` and `{domain}` from the run metadata, benchmark DB, or user.
 Task Progress:
 - [ ] 1. Locate markup HTML, source text, model, domain
 - [ ] 2. Run analyze_markup.py for baseline metrics
+- [ ] 2.5. Report prompt/chunk budget + per-chunk yield (benchmark DB)
 - [ ] 3. Read source + markup samples; spot-check failure modes
 - [ ] 4. Read active entity prompts and domain config
 - [ ] 5. Write evaluation report (template below)
@@ -74,6 +75,33 @@ Manual spot-checks the script does **not** cover:
 - Version fragmentation (split product + version spans)
 - Truncated or invented composite spans
 
+### Step 2.5 — Budget and yield context
+
+Report alongside markup metrics (context for recommendations, not a hard cliff):
+
+```bash
+uv run python scripts/chunk_yield.py \
+  --document {filename} \
+  --model {model} \
+  --prompts-dir prompts/{model}/{domain}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `prompt_words` | Entity system + user prefix + suffix |
+| `chunk_size` | Document workload per LLM call (from config) |
+| `total_budget` | `prompt_words + chunk_size` — soft attention proxy |
+| `empty_chunk_rate` | Fraction of chunks returning 0 entities |
+| `mean_entities_per_chunk` | Average per-chunk extraction yield |
+| `regression.regressed` | True if yield dropped vs `--previous-run-id` |
+
+If `empty_chunk_rate ≥ 10%` or yield regressed after prompt growth, run the diagnostic before recommending more rules:
+
+```bash
+uv run python scripts/run_chunk_diagnostic.py \
+  --source input/{filename} --domain {domain} --model {model}
+```
+
 ### Step 3 — Failure mode taxonomy
 
 Classify each issue into one bucket (cite 2–3 examples each):
@@ -85,6 +113,7 @@ Classify each issue into one bucket (cite 2–3 examples each):
 5. **Span fidelity** — paraphrase, casing drift, truncated titles, invented composites
 6. **Redundancy clusters** — abbrev + full form + process variants (`ZDU`, `Zero Downtime Upgrade`, `ZDU process`)
 7. **Pipeline/linking** — orphan entities, resolver canonicalization breaking markup match
+8. **Yield collapse** — high `empty_chunk_rate` or sharp `entities_raw` drop; may be budget dilution *or* restrictive prompt phrasing. Run `run_chunk_diagnostic.py` before attributing; do not label as "over-pruning" without the diagnostic
 
 ### Step 4 — Grade and report
 
@@ -243,6 +272,8 @@ Before proposing prompt changes, classify each item:
 | **Document** | Evaluation report only, or one-off prompt edit | Cloudera version examples from one ZDU doc — not global defaults |
 
 When the user asks to **incorporate evaluation fixes into prompts**, edit `prompts/{model}/{domain}/entity.system.txt` and `entity.user.prefix.txt` — split system rules vs few-shot user prefix per `prompts/README.md`.
+
+**Before adding rules:** if `total_budget` is high *and* yield regressed, prefer shrinking `chunk_size` or swapping rules over appending. Never add aggressive `Extract only…` / heavy `Do not…` framing without checking `empty_chunk_rate` on the next run.
 
 ## Post-extraction improvements (pipeline)
 

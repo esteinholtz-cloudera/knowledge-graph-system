@@ -10,6 +10,12 @@ from collections import Counter
 from html import unescape
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.document.markup_metrics import orphan_entities, verbatim_issues  # noqa: E402
+
 
 ENTITY_LIST_RE = re.compile(
     r'<li>(?:<a[^>]*class="entity-name"[^>]*>|'
@@ -30,25 +36,6 @@ def load_entities(html: str) -> list[tuple[str, str]]:
 
 def load_spans(html: str) -> list[tuple[str, str, str]]:
     return [(typ, unescape(text.strip()), badge.strip()) for typ, text, badge in SPAN_RE.findall(html)]
-
-
-def verbatim_issues(entities: list[tuple[str, str]], source: str) -> list[dict]:
-    issues = []
-    for name, typ in entities:
-        if name in source:
-            continue
-        if name.lower() in source.lower():
-            issues.append({"entity": name, "type": typ, "issue": "case_or_spacing_drift"})
-        else:
-            issues.append({"entity": name, "type": typ, "issue": "not_in_source"})
-    return issues
-
-
-def orphan_entities(
-    entities: list[tuple[str, str]], spans: list[tuple[str, str, str]]
-) -> list[str]:
-    marked = {text for _, text, _ in spans if text}
-    return sorted(name for name, _ in entities if name not in marked)
 
 
 def main() -> int:

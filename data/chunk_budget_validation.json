@@ -1,0 +1,103 @@
+{
+  "prompt_words": 130,
+  "prompts_dir": "/Users/eriksteinholz/src/knowledge-graph-system/prompts/qwen3-30b-a3b-instruct-2507-mlx/technical",
+  "runs": [
+    {
+      "chunk_size": 200,
+      "overlap": 40,
+      "chunk_count": 18,
+      "prompt_words": 130,
+      "total_budget": 330,
+      "entities_raw": 114,
+      "entities_resolved": 106,
+      "empty_chunk_rate": 0.0,
+      "mean_entities_per_chunk": 9.5,
+      "min_entities_per_chunk": 1,
+      "max_entities_per_chunk": 20,
+      "orphan_rate": 0.107,
+      "verbatim_rate": 0.0574,
+      "error_score": 0.0805,
+      "run_id": "f8e3d3cf-3b98-4283-9a48-a60beb7f9bea"
+    },
+    {
+      "chunk_size": 300,
+      "overlap": 60,
+      "chunk_count": 12,
+      "prompt_words": 130,
+      "total_budget": 430,
+      "entities_raw": 107,
+      "entities_resolved": 99,
+      "empty_chunk_rate": 0.0,
+      "mean_entities_per_chunk": 12.58,
+      "min_entities_per_chunk": 7,
+      "max_entities_per_chunk": 19,
+      "orphan_rate": 0.091,
+      "verbatim_rate": 0.0636,
+      "error_score": 0.0718,
+      "run_id": "7e516ce8-0a89-4f08-9a94-116b63236660"
+    },
+    {
+      "chunk_size": 400,
+      "overlap": 80,
+      "chunk_count": 9,
+      "prompt_words": 130,
+      "total_budget": 530,
+      "entities_raw": 106,
+      "entities_resolved": 98,
+      "empty_chunk_rate": 0.0,
+      "mean_entities_per_chunk": 16.78,
+      "min_entities_per_chunk": 11,
+      "max_entities_per_chunk": 22,
+      "orphan_rate": 0.125,
+      "verbatim_rate": 0.0625,
+      "error_score": 0.083,
+      "run_id": "28915fb5-b1ed-49e3-a14e-d1370bcf3ceb"
+    }
+  ],
+  "analysis": {
+    "chunk_sizes": [
+      200,
+      300,
+      400
+    ],
+    "metrics": {
+      "empty_chunk_rate": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "error_score": [
+        0.0805,
+        0.0718,
+        0.083
+      ],
+      "orphan_rate": [
+        0.107,
+        0.091,
+        0.125
+      ],
+      "verbatim_rate": [
+        0.0574,
+        0.0636,
+        0.0625
+      ],
+      "entities_raw": [
+        114,
+        107,
+        106
+      ],
+      "mean_entities_per_chunk": [
+        9.5,
+        12.58,
+        16.78
+      ]
+    },
+    "error_score_increases_with_chunk": false,
+    "empty_chunk_rate_increases_with_chunk": false,
+    "entities_raw_decreases_with_chunk": true,
+    "error_delta_largest_minus_smallest": 0.0025,
+    "entities_raw_delta_smallest_minus_largest": 8,
+    "soft_budget_verdict": "weak",
+    "soft_budget_supported": true
+  }
+}

@@ -1,14 +1,1 @@
-Example input:
-"Source cluster must run Cloudera Runtime 7.1.7 SP3 to upgrade. Delete topics (ATLAS_HOOK, ATLAS_ENTITIES) manually. Set replication.factor to 3. Restart Atlas."
-
-Example output:
-[
-  {"entity": "Cloudera Runtime 7.1.7 SP3", "type": "Product", "context": "minimum source version"},
-  {"entity": "7.1.7 SP3", "type": "Version", "context": "source version"},
-  {"entity": "ATLAS_HOOK", "type": "Configuration", "context": "Kafka topic to delete"},
-  {"entity": "replication.factor", "type": "Configuration", "context": "availability setting"}
-]
-
-Do NOT extract: Restart, topic, topics.
-
 Text:

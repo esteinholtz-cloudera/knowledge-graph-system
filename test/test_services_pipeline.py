@@ -86,7 +86,7 @@ def test_pipeline_run_one_chunk(
     with patch("src.services.pipeline.load_config") as mock_cfg:
         app = MagicMock()
         app.llm.for_model.return_value = MagicMock(
-            chunk_size=800, overlap=100, section_size=1,
+            chunk_size=800, overlap=100, section_size=1, chunk_strategy="recursive",
         )
         app.get_domain.return_value = MagicMock(description="")
         app.entity_resolution.enabled = False

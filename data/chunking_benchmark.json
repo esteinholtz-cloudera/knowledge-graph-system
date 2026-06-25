@@ -1,0 +1,38 @@
+[
+  {
+    "name": "fixed_300_100",
+    "strategy": "fixed",
+    "chunk_size": 300,
+    "overlap": 100,
+    "chunk_count": 13,
+    "avg_words": 288.2,
+    "min_words": 146,
+    "max_words": 300,
+    "mid_sentence_boundaries": 9,
+    "boundary_count": 12
+  },
+  {
+    "name": "recursive_300_50",
+    "strategy": "recursive",
+    "chunk_size": 300,
+    "overlap": 50,
+    "chunk_count": 11,
+    "avg_words": 286.5,
+    "min_words": 260,
+    "max_words": 296,
+    "mid_sentence_boundaries": 0,
+    "boundary_count": 10
+  },
+  {
+    "name": "recursive_350_60",
+    "strategy": "recursive",
+    "chunk_size": 350,
+    "overlap": 60,
+    "chunk_count": 9,
+    "avg_words": 343.2,
+    "min_words": 330,
+    "max_words": 349,
+    "mid_sentence_boundaries": 0,
+    "boundary_count": 8
+  }
+]

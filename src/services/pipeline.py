@@ -1,5 +1,6 @@
 """Full document processing and knowledge graph extraction pipeline."""
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,7 @@ from src.services.progress import (
 )
 from src.storage.benchmark_store import create_benchmark_store
 from src.storage.metadata_store import MetadataStore
+from src.storage.rdf_utils import canonical_match_key, normalise_whitespace
 from src.storage.turtle_writer import TurtleWriter
 
 
@@ -234,6 +236,7 @@ class PipelineService:
         processor = self._document_processor_factory(
             chunk_size=llm_cfg.chunk_size,
             overlap=llm_cfg.overlap,
+            chunk_strategy=llm_cfg.chunk_strategy,
         )
         doc_data = processor.process_document(options.file_path)
         document_id = Path(doc_data["filename"]).stem
@@ -301,6 +304,7 @@ class PipelineService:
         processor = self._document_processor_factory(
             chunk_size=llm_cfg.chunk_size,
             overlap=llm_cfg.overlap,
+            chunk_strategy=llm_cfg.chunk_strategy,
         )
         doc_data = processor.process_document(options.file_path)
         document_id = Path(doc_data["filename"]).stem
@@ -324,7 +328,10 @@ class PipelineService:
             payload={
                 "kind": "pass_banner",
                 "title": "Pass 1 of 2 — Entity extraction",
-                "lines": [f"({total_chunks} chunk(s) × {ctx.llm_cfg.chunk_size} words)"],
+                "lines": [
+                    f"({total_chunks} chunk(s) × {ctx.llm_cfg.chunk_size} words, "
+                    f"{ctx.llm_cfg.chunk_strategy} chunking)",
+                ],
             },
         ))
 
@@ -426,11 +433,10 @@ class PipelineService:
         return unique_entities
 
     def _canonical_lookup(self, unique_entities: Dict[str, dict]) -> Dict[str, str]:
-        canonical_names = list(unique_entities.keys())
-        lookup = {name.lower(): name for name in canonical_names}
+        lookup = {canonical_match_key(name): name for name in unique_entities}
         for entity in unique_entities.values():
             for alt in entity.get("alternate_names", []):
-                lookup[alt.lower()] = entity["entity"]
+                lookup[canonical_match_key(alt)] = entity["entity"]
         return lookup
 
     def _merge_triples(
@@ -442,8 +448,10 @@ class PipelineService:
     ) -> int:
         new_count = 0
         for t in triples:
-            subj = canonical_lookup.get(t.get("subject", "").lower(), t.get("subject", ""))
-            obj = canonical_lookup.get(t.get("object", "").lower(), t.get("object", ""))
+            subj_raw = t.get("subject", "")
+            obj_raw = t.get("object", "")
+            subj = canonical_lookup.get(canonical_match_key(subj_raw), subj_raw)
+            obj = canonical_lookup.get(canonical_match_key(obj_raw), obj_raw)
             t = {**t, "subject": subj, "object": obj}
             key = (t["subject"], t.get("predicate", ""), t["object"])
             if key not in all_triples_set:
@@ -718,36 +726,39 @@ class PipelineService:
 
     @staticmethod
     def _dedupe_entities(all_entities: List[dict]) -> dict:
-        def _best_form(name: str) -> str:
-            if name.isupper() and len(name) >= 4:
-                return name.title()
-            return name
+        """Collapse case/spacing-variant entities into one canonical surface form.
 
-        def _form_rank(name: str) -> int:
-            return 0 if name == name.lower() else 1
-
-        _ci: dict = {}
+        Variants are grouped by a case- and whitespace-insensitive key. The
+        canonical form is the most frequently extracted surface form, then the
+        most uppercase-rich (keeps acronyms like HDFS over Hdfs), then the
+        longest. Remaining variants are kept as alternate_names so the markup
+        correlator and triple merge can still link them.
+        """
+        groups: dict = {}
         for entity in all_entities:
-            name = entity.get("entity", "")
+            name = normalise_whitespace(entity.get("entity", ""))
             if not name:
                 continue
-            key = name.lower()
-            canonical = _best_form(name)
-            existing = _ci.get(key)
-            if existing is None:
-                _ci[key] = {**entity, "entity": canonical, "alternate_names": set()}
-            else:
-                current = existing["entity"]
-                if _form_rank(canonical) > _form_rank(current):
-                    existing["alternate_names"].add(current)
-                    existing["entity"] = canonical
-                if existing.get("type", "Other") == "Other" and entity.get("type", "Other") != "Other":
-                    existing["type"] = entity["type"]
-            if _ci[key]["entity"] != name:
-                _ci[key]["alternate_names"].add(name)
+            key = canonical_match_key(name)
+            group = groups.get(key)
+            if group is None:
+                groups[key] = {"base": {**entity, "entity": name}, "forms": Counter()}
+                group = groups[key]
+            group["forms"][name] += 1
+            base = group["base"]
+            if base.get("type", "Other") == "Other" and entity.get("type", "Other") != "Other":
+                base["type"] = entity["type"]
+
+        def _rank(item: tuple) -> tuple:
+            form, count = item
+            return (count, sum(1 for c in form if c.isupper()), len(form))
 
         unique_entities: dict = {}
-        for entry in _ci.values():
-            entry["alternate_names"] = sorted(entry["alternate_names"])
-            unique_entities[entry["entity"]] = entry
+        for group in groups.values():
+            forms = group["forms"]
+            canonical = max(forms.items(), key=_rank)[0]
+            base = group["base"]
+            base["entity"] = canonical
+            base["alternate_names"] = sorted(f for f in forms if f != canonical)
+            unique_entities[canonical] = base
         return unique_entities

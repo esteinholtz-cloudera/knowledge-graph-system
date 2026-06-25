@@ -21,7 +21,7 @@ SLEEP_S = 0.15
 def _mock_config(max_concurrent: int):
     app = MagicMock()
     app.llm.for_model.return_value = MagicMock(
-        chunk_size=100, overlap=10, section_size=1,
+        chunk_size=100, overlap=10, section_size=1, chunk_strategy="recursive",
     )
     app.get_domain.return_value = MagicMock(description="")
     app.entity_resolution.enabled = False

@@ -161,6 +161,7 @@ class PromptStore:
             "llm_model": model_name,
             "chunk_size": llm_cfg.chunk_size,
             "overlap": llm_cfg.overlap,
+            "chunk_strategy": llm_cfg.chunk_strategy,
             "section_size": llm_cfg.section_size,
             "files": files,
         }

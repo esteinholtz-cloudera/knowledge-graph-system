@@ -12,32 +12,41 @@ SCHEMA = Namespace("http://schema.org/")
 ONT = Namespace("http://example.org/ontology/")  # Local ontology namespace
 
 
+def normalise_whitespace(text: str) -> str:
+    """Collapse runs of whitespace to single spaces and strip the ends."""
+    return " ".join(text.split())
+
+
+def canonical_match_key(entity_name: str) -> str:
+    """Case- and spacing-insensitive grouping key for entity surface variants.
+
+    "HDFS", "Hdfs", "hdfs" and "7.1.9  SP1" / "7.1.9 SP1" all map to one key,
+    so case- and spacing-drift duplicates collapse to a single canonical entity.
+    Casing/spacing errors are corrected here (postprocessing) rather than via
+    prompt tuning.
+    """
+    return normalise_whitespace(entity_name).casefold()
+
+
 def normalise_entity_name(entity_name: str) -> str:
     """
     Normalise an entity name for consistent URI generation.
 
-    ALL_CAPS words are converted to Title Case so that HAMLET and Hamlet
-    produce the same URI.  Mixed-case names (e.g. "LLM", "iPhone") are
-    left unchanged.
+    Only whitespace is normalised (collapsed to single spaces) so spacing
+    drift ("7.1.9  SP1" vs "7.1.9 SP1") resolves to the same URI. Original
+    casing is preserved so acronyms stay verbatim (HDFS stays HDFS, not Hdfs).
+    A single canonical surface form per entity is chosen upstream during
+    deduplication/resolution, so case variants never reach this point.
     """
-    words = entity_name.strip().split()
-    normalised = []
-    for word in words:
-        # Convert ALL-CAPS words of 4+ chars (proper names like HAMLET, KING).
-        # Short ALL-CAPS (LLM, RAG, API, ...) are preserved as-is.
-        if word.isalpha() and word.isupper() and len(word) >= 4:
-            normalised.append(word.title())
-        else:
-            normalised.append(word)
-    return " ".join(normalised)
+    return normalise_whitespace(entity_name)
 
 
 def create_entity_uri(entity_name: str, namespace: Namespace = KG) -> URIRef:
     """
     Create a URI for an entity.
 
-    Entity names are normalised (ALL_CAPS → Title Case) before URI generation
-    so that HAMLET and Hamlet resolve to the same kg:Hamlet URI.
+    The name's whitespace is normalised before URI generation; casing is
+    preserved so the canonical acronym form (e.g. HDFS) is kept verbatim.
     """
     normalised = normalise_entity_name(entity_name)
     sanitized = quote(normalised.replace(' ', '_'), safe='')

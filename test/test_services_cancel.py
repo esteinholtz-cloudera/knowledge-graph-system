@@ -51,7 +51,7 @@ def test_cancel_before_relationships(
 
     with patch("src.services.pipeline.load_config") as mock_cfg:
         app = MagicMock()
-        app.llm.for_model.return_value = MagicMock(chunk_size=100, overlap=10, section_size=1)
+        app.llm.for_model.return_value = MagicMock(chunk_size=100, overlap=10, section_size=1, chunk_strategy="recursive")
         app.get_domain.return_value = MagicMock(description="")
         app.entity_resolution.enabled = False
         app.llm.provider = "mock"

@@ -151,6 +151,9 @@ class NullBenchmarkStore:
     def start_run(self, **kwargs) -> str:
         return "null-run"
 
+    def import_historical_run(self, **kwargs) -> str:
+        return kwargs.get("run_id", "null-run")
+
     def finish_run(self, *args, **kwargs):
         pass
 
@@ -254,7 +257,71 @@ class BenchmarkStore:
                 run_snapshot_json,
             ],
         )
-        # Strategies in normalized table — one row per strategy, ordered
+        for pos, strategy in enumerate(resolution_strategies):
+            self._con.execute(
+                "INSERT INTO run_strategies (run_id, position, strategy) VALUES (?, ?, ?)",
+                [run_id, pos, strategy],
+            )
+        return run_id
+
+    def import_historical_run(
+        self,
+        *,
+        run_id: str,
+        started_at: datetime,
+        finished_at: datetime,
+        document_filename: str,
+        document_id: str,
+        word_count: int,
+        chunk_count: int,
+        entities_raw: int,
+        entities_resolved: int,
+        triples: int,
+        elapsed_s: float,
+        llm_provider: str,
+        llm_model: str,
+        resolution_enabled: bool,
+        resolution_strategies: list,
+        proposals: int = 0,
+        max_chunks: Optional[int] = None,
+        run_snapshot_json: Optional[str] = None,
+    ) -> str:
+        """Insert a completed run row for backfill (skips if run_id already exists)."""
+        existing = self._con.execute(
+            "SELECT 1 FROM runs WHERE run_id = ?", [run_id],
+        ).fetchone()
+        if existing:
+            return run_id
+        self._con.execute(
+            """
+            INSERT INTO runs (
+                run_id, started_at, finished_at, document_filename, document_id,
+                word_count, chunk_count, max_chunks,
+                entities_raw, entities_resolved, triples, elapsed_s,
+                llm_provider, llm_model, resolution_enabled, proposals,
+                run_snapshot_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                run_id,
+                started_at,
+                finished_at,
+                document_filename,
+                document_id,
+                word_count,
+                chunk_count,
+                max_chunks,
+                entities_raw,
+                entities_resolved,
+                triples,
+                elapsed_s,
+                llm_provider,
+                llm_model,
+                resolution_enabled,
+                proposals,
+                run_snapshot_json,
+            ],
+        )
         for pos, strategy in enumerate(resolution_strategies):
             self._con.execute(
                 "INSERT INTO run_strategies (run_id, position, strategy) VALUES (?, ?, ?)",
