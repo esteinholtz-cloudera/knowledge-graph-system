@@ -75,7 +75,16 @@ def _run_upgrade(args) -> None:
         print("No sources. Provide --sitemap, --url, --urls-file, or --input.")
         sys.exit(1)
     print(f"Funnel input: {len(sources)} source(s). LLM: {'off' if args.no_llm else 'on'}")
-    result = run_upgrade_extraction(sources, args.output, use_llm=not args.no_llm)
+
+    def _on_progress(p) -> None:
+        print(
+            f"[{p.index}/{p.total}] {p.status}: {p.source} "
+            f"(facts so far: {p.fact_count}, saved to {args.output})"
+        )
+
+    result = run_upgrade_extraction(
+        sources, args.output, use_llm=not args.no_llm, on_progress=_on_progress,
+    )
     print(
         f"Pages processed: {result.pages} (skipped {result.skipped_duplicates} duplicate(s))\n"
         f"Chunks: {result.chunks_gated} sent to LLM of {result.chunks_total} total "

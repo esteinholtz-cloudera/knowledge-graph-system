@@ -6,6 +6,7 @@ ontology, so emission is a direct, side-effect-free serialization.
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Iterable
@@ -61,9 +62,15 @@ def build_graph(facts: Iterable[UpgradeFact]) -> Graph:
 
 
 def write_upgrade_ttl(facts: Iterable[UpgradeFact], output_path: str) -> str:
-    """Serialize deduped upgrade facts to ``output_path``; return that path."""
+    """Serialize deduped upgrade facts to ``output_path``; return that path.
+
+    Writes to a temp file and atomically renames, so an interrupted incremental
+    save can never leave a half-written TTL behind.
+    """
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     graph = build_graph(facts)
-    graph.serialize(destination=str(path), format="turtle")
+    tmp_path = path.with_name(path.name + ".tmp")
+    graph.serialize(destination=str(tmp_path), format="turtle")
+    os.replace(tmp_path, path)
     return str(path)

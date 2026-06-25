@@ -131,3 +131,68 @@ def test_runner_no_llm_is_deterministic(tmp_path):
     assert result.llm_facts == 0
     assert result.chunks_gated == 0
     assert result.table_facts >= 2
+
+
+_SECOND_HTML = """
+<table>
+  <tr><th>From version</th><th>To version</th></tr>
+  <tr><td>CDP 7.1.6</td><td>CDP 7.1.9</td></tr>
+</table>
+"""
+
+
+def test_runner_saves_incrementally_and_reports_progress(tmp_path):
+    a = tmp_path / "a.html"
+    a.write_text(_FROM_TO_HTML, encoding="utf-8")
+    b = tmp_path / "b.html"
+    b.write_text(_SECOND_HTML, encoding="utf-8")
+    out = tmp_path / "upgrade.ttl"
+
+    ticks = []
+
+    def on_progress(p):
+        # The TTL must already exist and be parseable mid-run after each source.
+        graph = Graph()
+        if out.exists():
+            graph.parse(out, format="turtle")
+        ticks.append((p.index, p.total, p.status, p.fact_count, len(graph)))
+
+    result = run_upgrade_extraction(
+        [str(a), str(b)], str(out), use_llm=False, on_progress=on_progress
+    )
+
+    # Overall progress indicator: one tick per source, increasing index, fixed total.
+    assert [t[0] for t in ticks] == [1, 2]
+    assert all(t[1] == 2 for t in ticks)
+    assert all(t[2] == "processed" for t in ticks)
+    # Incremental save: facts are on disk after the first file, and grow after the second.
+    assert ticks[0][4] >= 1
+    assert ticks[1][4] > ticks[0][4]
+    assert result.fact_count >= 3
+
+
+def test_runner_progress_reports_skipped_duplicate(tmp_path):
+    a = tmp_path / "a.html"
+    a.write_text(_FROM_TO_HTML, encoding="utf-8")
+    dup = tmp_path / "dup.html"
+    dup.write_text(_FROM_TO_HTML, encoding="utf-8")  # identical content
+    out = tmp_path / "upgrade.ttl"
+
+    statuses = []
+    result = run_upgrade_extraction(
+        [str(a), str(dup)], str(out), use_llm=False,
+        on_progress=lambda p: statuses.append(p.status),
+    )
+    assert statuses == ["processed", "skipped-duplicate"]
+    assert result.skipped_duplicates == 1
+
+
+def test_runner_progress_reports_failed_source(tmp_path):
+    out = tmp_path / "upgrade.ttl"
+    statuses = []
+    run_upgrade_extraction(
+        [str(tmp_path / "missing.html")], str(out), use_llm=False,
+        on_progress=lambda p: statuses.append(p.status),
+    )
+    assert statuses == ["failed"]
+    assert out.exists()  # a valid (empty) TTL is still written

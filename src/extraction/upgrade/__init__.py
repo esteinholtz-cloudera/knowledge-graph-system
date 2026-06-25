@@ -16,12 +16,13 @@ from .schema import (
     gate_chunks,
     is_upgrade_url,
 )
-from .runner import UpgradeRunResult, run_upgrade_extraction
+from .runner import UpgradeProgress, UpgradeRunResult, run_upgrade_extraction
 from .writer import write_upgrade_ttl
 
 __all__ = [
     "UPGRADE_PREDICATES",
     "UpgradeFact",
+    "UpgradeProgress",
     "UpgradeRunResult",
     "dedupe_facts",
     "gate_chunks",
