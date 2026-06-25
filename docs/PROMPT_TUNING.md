@@ -8,6 +8,23 @@ Extraction quality depends on two orthogonal axes of prompt configuration:
 | **Per-domain** | Entity type vocabulary, predicate vocabulary | `domains.<name>.extra_entity_types / extra_predicates` |
 
 At runtime the two are composed into the final prompt by `src/extraction/prompt_builder.py`.
+Editable copies are stored under `prompts/{model}/{domain}/` as concrete text files
+and loaded by `src/extraction/prompt_store.py`.
+
+---
+
+## Prompt files on disk
+
+Each model + domain has six fully-resolved files (no config placeholders). See `prompts/README.md`.
+
+```bash
+python main.py prompts regenerate --all
+python main.py prompts regenerate --model qwen3-30b-a3b-instruct-2507-mlx --domain technical --force
+python main.py prompts list
+```
+
+Regeneration uses `prompt_builder.py` as the template source; extraction reads the
+instance files as-is. Model name comes from the loaded LLM; domain from `--domain`.
 
 ---
 

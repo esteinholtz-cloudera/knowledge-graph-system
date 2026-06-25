@@ -17,10 +17,11 @@ resolution    — one row per resolution strategy per run
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 try:
     import duckdb
@@ -48,7 +49,8 @@ CREATE TABLE IF NOT EXISTS runs (
     llm_provider      TEXT,
     llm_model         TEXT,
     resolution_enabled BOOLEAN,
-    proposals         INTEGER
+    proposals         INTEGER,
+    run_snapshot_json TEXT
 );
 
 -- Normalized: one row per strategy per run (replaces CSV in runs.resolution_strategies)
@@ -106,7 +108,41 @@ CREATE TABLE IF NOT EXISTS sub_taxonomy_approvals (
     entity_retyped    BOOLEAN,
     recorded_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE SEQUENCE IF NOT EXISTS seq_ee_judge START 1;
+
+CREATE TABLE IF NOT EXISTS ee_judge_evaluations (
+    id                INTEGER PRIMARY KEY DEFAULT nextval('seq_ee_judge'),
+    eval_id           TEXT UNIQUE,
+    run_id            TEXT,
+    recorded_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    document_filename TEXT,
+    document_id       TEXT,
+    markup_path       TEXT,
+    source_path       TEXT,
+    llm_model         TEXT,
+    domain            TEXT,
+    grade             TEXT,
+    grade_score       DOUBLE,
+    summary           TEXT,
+    unique_entities   INTEGER,
+    marked_spans      INTEGER,
+    orphan_entities   INTEGER,
+    orphan_rate       DOUBLE,
+    verbatim_issues   INTEGER,
+    metrics_json      TEXT,
+    prompts_before    TEXT,
+    prompts_after     TEXT,
+    optimization_applied BOOLEAN DEFAULT FALSE
+);
 """
+
+
+def _migrate_runs_schema(con: "duckdb.DuckDBPyConnection") -> None:
+    """Add columns introduced after initial schema without recreating tables."""
+    existing = {row[0] for row in con.execute("DESCRIBE runs").fetchall()}
+    if "run_snapshot_json" not in existing:
+        con.execute("ALTER TABLE runs ADD COLUMN run_snapshot_json TEXT")
 
 
 class NullBenchmarkStore:
@@ -129,6 +165,18 @@ class NullBenchmarkStore:
 
     def record_sub_taxonomy_approval(self, *args, **kwargs):
         pass
+
+    def record_ee_judge_evaluation(self, **kwargs) -> str:
+        return "null-eval"
+
+    def update_ee_judge_prompts_after(self, *args, **kwargs):
+        pass
+
+    def get_run_snapshot(self, run_id: str) -> Optional[Dict[str, Any]]:
+        return None
+
+    def restore_run_snapshot(self, run_id: str, project_root: Path) -> Path:
+        raise RuntimeError("Benchmark store unavailable — install duckdb extra")
 
     def query(self, sql: str):
         print("DuckDB not installed — benchmark queries unavailable.")
@@ -165,6 +213,7 @@ class BenchmarkStore:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._con = duckdb.connect(db_path)
         self._con.execute(_DDL)
+        _migrate_runs_schema(self._con)
 
     # ------------------------------------------------------------------
     # Run lifecycle
@@ -180,6 +229,7 @@ class BenchmarkStore:
         resolution_enabled: bool,
         resolution_strategies: list,
         max_chunks: Optional[int] = None,
+        run_snapshot_json: Optional[str] = None,
     ) -> str:
         run_id = str(uuid.uuid4())
         self._con.execute(
@@ -187,9 +237,9 @@ class BenchmarkStore:
             INSERT INTO runs (
                 run_id, started_at, document_filename, document_id,
                 word_count, max_chunks, llm_provider, llm_model,
-                resolution_enabled,
+                resolution_enabled, run_snapshot_json,
                 entities_raw, entities_resolved, triples, proposals
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0)
             """,
             [
                 run_id,
@@ -201,6 +251,7 @@ class BenchmarkStore:
                 llm_provider,
                 llm_model,
                 resolution_enabled,
+                run_snapshot_json,
             ],
         )
         # Strategies in normalized table — one row per strategy, ordered
@@ -340,6 +391,103 @@ class BenchmarkStore:
             ],
         )
 
+    def record_ee_judge_evaluation(
+        self,
+        *,
+        document_filename: str,
+        markup_path: str,
+        source_path: str,
+        llm_model: str,
+        domain: str,
+        grade: str,
+        summary: str,
+        unique_entities: int,
+        marked_spans: int,
+        orphan_entities: int,
+        orphan_rate: float,
+        verbatim_issues: int,
+        metrics_json: str,
+        prompts_before: str,
+        run_id: Optional[str] = None,
+        document_id: str = "",
+        grade_score: Optional[float] = None,
+        prompts_after: Optional[str] = None,
+        optimization_applied: bool = False,
+    ) -> str:
+        """Record an LLM-as-judge entity extraction evaluation."""
+        eval_id = str(uuid.uuid4())
+        self._con.execute(
+            """
+            INSERT INTO ee_judge_evaluations (
+                eval_id, run_id, document_filename, document_id,
+                markup_path, source_path, llm_model, domain,
+                grade, grade_score, summary,
+                unique_entities, marked_spans, orphan_entities,
+                orphan_rate, verbatim_issues,
+                metrics_json, prompts_before, prompts_after,
+                optimization_applied
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                eval_id,
+                run_id,
+                document_filename,
+                document_id,
+                markup_path,
+                source_path,
+                llm_model,
+                domain,
+                grade,
+                grade_score,
+                summary,
+                unique_entities,
+                marked_spans,
+                orphan_entities,
+                orphan_rate,
+                verbatim_issues,
+                metrics_json,
+                prompts_before,
+                prompts_after,
+                optimization_applied,
+            ],
+        )
+        return eval_id
+
+    def update_ee_judge_prompts_after(
+        self,
+        eval_id: str,
+        prompts_after: str,
+    ) -> None:
+        """Attach post-optimization prompts to an existing evaluation row."""
+        self._con.execute(
+            """
+            UPDATE ee_judge_evaluations SET
+                prompts_after = ?,
+                optimization_applied = TRUE
+            WHERE eval_id = ?
+            """,
+            [prompts_after, eval_id],
+        )
+
+    def get_run_snapshot(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Return stored prompt/chunk snapshot for a run, or None if missing."""
+        row = self._con.execute(
+            "SELECT run_snapshot_json FROM runs WHERE run_id = ?",
+            [run_id],
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        return json.loads(row[0])
+
+    def restore_run_snapshot(self, run_id: str, project_root: Path) -> Path:
+        """Write stored prompt files back to disk for reproducibility."""
+        from src.extraction.prompt_store import PromptStore
+
+        snapshot = self.get_run_snapshot(run_id)
+        if snapshot is None:
+            raise ValueError(f"No prompt snapshot stored for run {run_id}")
+        return PromptStore(project_root).write_snapshot_files(snapshot)
+
     # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
@@ -349,6 +497,7 @@ class BenchmarkStore:
 
     def clear(self):
         for table in (
+            "ee_judge_evaluations",
             "sub_taxonomy_approvals",
             "resolution_runs",
             "llm_calls",
@@ -376,6 +525,7 @@ class BenchmarkStore:
             proposals,
             round(elapsed_s, 1)                       AS elapsed_s,
             llm_model                                 AS model,
+            (run_snapshot_json IS NOT NULL)           AS snapshot,
             CASE WHEN resolution_enabled
                  THEN (SELECT string_agg(strategy, '→' ORDER BY position)
                        FROM run_strategies rs WHERE rs.run_id = r.run_id)
@@ -410,4 +560,22 @@ class BenchmarkStore:
         JOIN runs r USING (run_id)
         ORDER BY r.started_at DESC, l.chunk_number, l.stage
         LIMIT 100
+    """
+
+    EE_JUDGE_SQL = """
+        SELECT
+            strftime(recorded_at, '%Y-%m-%d %H:%M') AS evaluated,
+            document_filename                         AS document,
+            llm_model                                 AS model,
+            domain,
+            grade,
+            round(grade_score, 0)                     AS score,
+            unique_entities                           AS entities,
+            round(orphan_rate * 100, 0)               AS orphan_pct,
+            verbatim_issues                           AS verbatim,
+            optimization_applied                      AS optimized,
+            left(summary, 60)                         AS summary
+        FROM ee_judge_evaluations
+        ORDER BY recorded_at DESC
+        LIMIT 20
     """

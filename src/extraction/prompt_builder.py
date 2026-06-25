@@ -1,18 +1,17 @@
 """
 Build extraction prompts from LLM settings and domain configuration.
 
-Prompts are composed from three layers:
-  1. Structure   — fixed schema and field definitions (same for all models/domains)
-  2. Vocabulary  — entity types and predicate list (domain-specific, merged with defaults)
-  3. Format      — JSON-only enforcement and optional few-shot example (model-specific)
+Used to regenerate concrete prompt instance files under prompts/{model}/{domain}/.
+At extraction time the pipeline reads those files directly — no runtime templating.
 
-Call build_entity_prompts() / build_relationship_prompts() at the start of each
-extraction run to get the (system_prompt, user_prompt_template) pair for that
-model + domain combination.
+Regenerate with:
+  python main.py prompts regenerate --model qwen3-30b-a3b-instruct-2507-mlx --domain technical
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Tuple
+
+from .prompt_layout import UserPromptLayout
 
 if TYPE_CHECKING:
     from ..config.settings import DomainSettings, LLMSettings
@@ -31,14 +30,12 @@ BASE_PREDICATES = [
     "manages", "references",
 ]
 
-# Per-strictness suffix appended to the JSON-only instruction.
 _FORMAT_SUFFIX = {
     "low": "",
     "medium": " Start your response with [ and end with ].",
     "high": ' Start with [ and end with ]. Do NOT write any text outside the JSON.',
 }
 
-# Few-shot example injected into the user prompt for models that need it.
 _EE_FEW_SHOT = '''Example input: "Marie Curie discovered radium in Paris in 1898."
 Example output:
 [
@@ -59,6 +56,9 @@ Example output:
 ]
 
 '''
+
+_ENTITY_USER_SUFFIX = "\n\nJSON array (no preamble):"
+_RELATIONSHIP_USER_SUFFIX = "\n\nJSON array of triples (no preamble):"
 
 
 def _merged_types(domain: "DomainSettings") -> List[str]:
@@ -81,54 +81,42 @@ def _merged_predicates(domain: "DomainSettings") -> List[str]:
     return predicates
 
 
-def build_entity_prompts(
-    llm_cfg: "LLMSettings",
-    domain: "DomainSettings",
-) -> Tuple[str, str]:
-    """
-    Build entity extraction (system_prompt, user_prompt_template).
-    user_prompt_template contains {text} placeholder.
-    """
-    types = _merged_types(domain)
-    type_list = " | ".join(types)
-    strictness = llm_cfg.format_strictness
-    format_suffix = _FORMAT_SUFFIX.get(strictness, "")
-    domain_hint = f"\nDomain context: {domain.description}." if domain.description else ""
+def _format_suffix(llm_cfg: "LLMSettings") -> str:
+    return _FORMAT_SUFFIX.get(llm_cfg.format_strictness, "")
 
-    system = (
-        f"You are an expert at extracting named entities from text.{domain_hint}\n\n"
+
+def _entity_few_shot(llm_cfg: "LLMSettings") -> str:
+    return _EE_FEW_SHOT if llm_cfg.use_few_shot else ""
+
+
+def _relationship_few_shot(llm_cfg: "LLMSettings") -> str:
+    return _RE_FEW_SHOT if llm_cfg.use_few_shot else ""
+
+
+def _domain_hint(domain: "DomainSettings") -> str:
+    return f"\nDomain context: {domain.description}." if domain.description else ""
+
+
+def _build_entity_system(llm_cfg: "LLMSettings", domain: "DomainSettings") -> str:
+    type_list = " | ".join(_merged_types(domain))
+    return (
+        f"You are an expert at extracting named entities from text.{_domain_hint(domain)}\n\n"
         f"Extract all meaningful entities.\n\n"
-        f"Return ONLY a JSON array — no explanation, no markdown, no preamble.{format_suffix} "
-        f"Each element must have:\n"
+        f"Return ONLY a JSON array — no explanation, no markdown, no preamble."
+        f"{_format_suffix(llm_cfg)} Each element must have:\n"
         f'- "entity": the entity name exactly as it appears in the text\n'
         f'- "type": one of {type_list}\n'
         f'- "context": one short phrase describing the entity\'s role in the text'
     )
 
-    few_shot = _EE_FEW_SHOT if llm_cfg.use_few_shot else ""
-    user_template = f"{few_shot}Text:\n{{text}}\n\nJSON array (no preamble):"
 
-    return system, user_template
-
-
-def build_relationship_prompts(
-    llm_cfg: "LLMSettings",
-    domain: "DomainSettings",
-) -> Tuple[str, str]:
-    """
-    Build relationship extraction (system_prompt, user_prompt_template).
-    user_prompt_template contains {text} and {entities} placeholders.
-    """
-    predicates = _merged_predicates(domain)
-    pred_list = ", ".join(predicates)
-    strictness = llm_cfg.format_strictness
-    format_suffix = _FORMAT_SUFFIX.get(strictness, "")
-    domain_hint = f"\nDomain context: {domain.description}." if domain.description else ""
-
-    system = (
-        f"You are an expert at extracting relationships between entities from text.{domain_hint}\n\n"
-        f"Return ONLY a JSON array of triples — no explanation, no markdown, no preamble.{format_suffix} "
-        f"Each element must have:\n"
+def _build_relationship_system(llm_cfg: "LLMSettings", domain: "DomainSettings") -> str:
+    pred_list = ", ".join(_merged_predicates(domain))
+    return (
+        f"You are an expert at extracting relationships between entities from text."
+        f"{_domain_hint(domain)}\n\n"
+        f"Return ONLY a JSON array of triples — no explanation, no markdown, no preamble."
+        f"{_format_suffix(llm_cfg)} Each element must have:\n"
         f'- "subject": source entity name\n'
         f'- "predicate": use the closest canonical verb from this list '
         f"(do NOT invent new predicates unless none fit):\n"
@@ -142,7 +130,50 @@ def build_relationship_prompts(
         f"Only include relationships explicitly stated or strongly implied."
     )
 
-    few_shot = _RE_FEW_SHOT if llm_cfg.use_few_shot else ""
-    user_template = f"{few_shot}Text:\n{{text}}\n\nEntities: {{entities}}\n\nJSON array of triples (no preamble):"
 
-    return system, user_template
+def build_entity_user_layout(llm_cfg: "LLMSettings", domain: "DomainSettings") -> UserPromptLayout:
+    del domain  # reserved for domain-specific user layouts later
+    return UserPromptLayout(
+        prefix=f"{_entity_few_shot(llm_cfg)}Text:\n",
+        suffix=_ENTITY_USER_SUFFIX,
+    )
+
+
+def build_relationship_user_layout(llm_cfg: "LLMSettings", domain: "DomainSettings") -> UserPromptLayout:
+    del domain
+    return UserPromptLayout(
+        prefix=f"{_relationship_few_shot(llm_cfg)}Text:\n",
+        suffix=_RELATIONSHIP_USER_SUFFIX,
+    )
+
+
+def build_entity_prompt_bundle(
+    llm_cfg: "LLMSettings",
+    domain: "DomainSettings",
+) -> Tuple[str, UserPromptLayout]:
+    return _build_entity_system(llm_cfg, domain), build_entity_user_layout(llm_cfg, domain)
+
+
+def build_relationship_prompt_bundle(
+    llm_cfg: "LLMSettings",
+    domain: "DomainSettings",
+) -> Tuple[str, UserPromptLayout]:
+    return _build_relationship_system(llm_cfg, domain), build_relationship_user_layout(llm_cfg, domain)
+
+
+def build_entity_prompts(
+    llm_cfg: "LLMSettings",
+    domain: "DomainSettings",
+) -> Tuple[str, str]:
+    """Legacy helper returning (system, user_template) with {text} placeholder."""
+    system, layout = build_entity_prompt_bundle(llm_cfg, domain)
+    return system, layout.with_text("{text}")
+
+
+def build_relationship_prompts(
+    llm_cfg: "LLMSettings",
+    domain: "DomainSettings",
+) -> Tuple[str, str]:
+    """Legacy helper returning (system, user_template) with {text} and {entities}."""
+    system, layout = build_relationship_prompt_bundle(llm_cfg, domain)
+    return system, layout.with_text_and_entities("{text}", "{entities}")

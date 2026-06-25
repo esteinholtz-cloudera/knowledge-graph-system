@@ -280,10 +280,13 @@ On macOS, port 5000 is often taken by AirPlay Receiver; the default API port is 
 
 | Doc | Contents |
 |-----|----------|
+| [CONTEXT-MAP.md](CONTEXT-MAP.md) | Ingestion vs Reasoning boundaries and artifact contract |
+| [CONTEXT.md](CONTEXT.md) | Ingestion glossary |
 | [docs/INFOMODEL.md](docs/INFOMODEL.md) | Internal information model — interconnection schema, domain objects, `/api/v1` mapping |
 | [docs/ONTOLOGY.md](docs/ONTOLOGY.md) | Ontology workflow, OWL structure, CLI review |
 | [docs/Benchmark.md](docs/Benchmark.md) | DuckDB benchmark schema and queries |
-| [docs/GUI_API_PLAN.md](docs/GUI_API_PLAN.md) | HTTP API and GUI architecture |
+| [docs/GUI_API_PLAN.md](docs/GUI_API_PLAN.md) | HTTP API and GUI architecture (Ingestion) |
+| [reasoning/README.md](reasoning/README.md) | Reasoning bounded context — ADRs and glossary |
 | [gui/README.md](gui/README.md) | Web UI setup and routes |
 
 ## Ontology management

@@ -176,9 +176,133 @@ class TestBenchmarkQuery:
     def test_clear_removes_all(self, populated_store):
         store, _ = populated_store
         store.clear()
-        for table in ("runs", "run_strategies", "chunks", "llm_calls", "resolution_runs"):
+        for table in (
+            "runs",
+            "run_strategies",
+            "chunks",
+            "llm_calls",
+            "resolution_runs",
+            "ee_judge_evaluations",
+        ):
             count = store.query(f"SELECT count(*) FROM {table}").fetchone()[0]
             assert count == 0, f"Table {table} not empty after clear()"
+
+
+class TestEeJudgeEvaluation:
+    def test_record_and_update_prompts(self, store):
+        import json
+
+        eval_id = store.record_ee_judge_evaluation(
+            document_filename="ZDU_prereqs.txt",
+            document_id="ZDU_prereqs",
+            markup_path="data/documents/ZDU_prereqs_markup.html",
+            source_path="input/ZDU_prereqs.txt",
+            llm_model="qwen3-30b",
+            domain="technical",
+            grade="B-",
+            grade_score=80.0,
+            summary="usable but noisy",
+            unique_entities=121,
+            marked_spans=311,
+            orphan_entities=35,
+            orphan_rate=0.29,
+            verbatim_issues=17,
+            metrics_json=json.dumps({"unique_entities": 121}),
+            prompts_before=json.dumps({"files": {"entity.system.txt": "before"}}),
+        )
+        row = store.query(
+            "SELECT grade, optimization_applied, prompts_after FROM ee_judge_evaluations"
+        ).fetchone()
+        assert row[0] == "B-"
+        assert row[1] is False
+        assert row[2] is None
+
+        store.update_ee_judge_prompts_after(
+            eval_id,
+            json.dumps({"files": {"entity.system.txt": "after"}}),
+        )
+        row = store.query(
+            "SELECT optimization_applied, prompts_after FROM ee_judge_evaluations"
+        ).fetchone()
+        assert row[0] is True
+        assert "after" in row[1]
+
+    def test_ee_judge_view(self, store):
+        import json
+
+        store.record_ee_judge_evaluation(
+            document_filename="doc.txt",
+            document_id="doc",
+            markup_path="m.html",
+            source_path="doc.txt",
+            llm_model="test-model",
+            domain="default",
+            grade="A",
+            grade_score=93.0,
+            summary="good",
+            unique_entities=10,
+            marked_spans=20,
+            orphan_entities=1,
+            orphan_rate=0.1,
+            verbatim_issues=0,
+            metrics_json="{}",
+            prompts_before="{}",
+        )
+        from src.storage.benchmark_store import BenchmarkStore
+
+        rows = store.query(BenchmarkStore.EE_JUDGE_SQL).fetchall()
+        assert len(rows) == 1
+
+
+class TestRunSnapshot:
+    def test_snapshot_stored_and_restored(self, store, tmp_path):
+        import json
+
+        snapshot = {
+            "prompts_dir": "prompts/test-model/technical",
+            "domain": "technical",
+            "llm_model": "test-model",
+            "chunk_size": 100,
+            "overlap": 25,
+            "section_size": 5,
+            "files": {
+                "entity.system.txt": "ENTITY SYSTEM",
+                "entity.user.prefix.txt": "PREFIX",
+                "entity.user.suffix.txt": "SUFFIX",
+                "relationship.system.txt": "REL SYSTEM",
+                "relationship.user.prefix.txt": "REL PREFIX",
+                "relationship.user.suffix.txt": "REL SUFFIX",
+            },
+        }
+        run_id = store.start_run(
+            document_filename="doc.txt",
+            document_id="doc",
+            word_count=100,
+            llm_provider="lmstudio",
+            llm_model="test-model",
+            resolution_enabled=False,
+            resolution_strategies=[],
+            run_snapshot_json=json.dumps(snapshot),
+        )
+        loaded = store.get_run_snapshot(run_id)
+        assert loaded == snapshot
+
+        prompts_dir = store.restore_run_snapshot(run_id, tmp_path)
+        assert prompts_dir == tmp_path / "prompts/test-model/technical"
+        assert (prompts_dir / "entity.system.txt").read_text(encoding="utf-8") == "ENTITY SYSTEM"
+
+    def test_restore_missing_snapshot_raises(self, store, tmp_path):
+        run_id = store.start_run(
+            document_filename="doc.txt",
+            document_id="doc",
+            word_count=100,
+            llm_provider="lmstudio",
+            llm_model="test-model",
+            resolution_enabled=False,
+            resolution_strategies=[],
+        )
+        with pytest.raises(ValueError, match="No prompt snapshot"):
+            store.restore_run_snapshot(run_id, tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +334,23 @@ class TestNullBenchmarkStore:
         s.record_chunk(run_id, 1, 100, 5, 3, 1.0)
         s.record_llm_call(run_id, "entity_extraction", 1.0)
         s.record_resolution(run_id, "rule_based", 5, 4, 0.1)
+        s.record_ee_judge_evaluation(
+            document_filename="x.txt",
+            markup_path="m.html",
+            source_path="x.txt",
+            llm_model="llama3.2",
+            domain="default",
+            grade="B",
+            summary="ok",
+            unique_entities=1,
+            marked_spans=1,
+            orphan_entities=0,
+            orphan_rate=0.0,
+            verbatim_issues=0,
+            metrics_json="{}",
+            prompts_before="{}",
+        )
+        s.update_ee_judge_prompts_after("null-eval", "{}")
         s.finish_run(run_id, 1, 5, 4, 3, 2.0, 0)
         s.clear()
         s.close()  # no exception expected
