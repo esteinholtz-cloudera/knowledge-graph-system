@@ -50,7 +50,8 @@ after human review (see [reasoning/docs/adr/0001-reasoning-substrate.md](reasoni
 
 | Write here | About |
 |------------|--------|
-| `docs/` | Ingestion pipeline, API, GUI, ontology workflow |
+| `docs/adr/` | System-wide decisions that span both contexts (e.g. the context split) |
+| `docs/` (other) | Ingestion pipeline, API, GUI, ontology workflow |
 | `reasoning/docs/` | Reasoning architecture, ADRs, future reasoning API/GUI plans |
 | `CONTEXT-MAP.md` | Boundaries and artifact contract only |
 
