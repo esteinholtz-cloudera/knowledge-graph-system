@@ -170,3 +170,20 @@ domains:
       - causedBy
       - treatedBy
       - expressedIn
+
+  # Narrow profile for the token-conservative `upgrade` funnel (see
+  # src/extraction/upgrade/). Deliberately tiny so the constrained LLM prompt
+  # stays small: only product/version entities and upgrade-relevant predicates.
+  upgrade:
+    description: "Product upgrade paths, supported versions, prerequisites, deprecations"
+    extra_entity_types:
+      - Product
+      - SoftwareVersion
+    extra_predicates:
+      - upgradesTo            # source version -> reachable target version
+      - supportedUpgradeFrom  # target version -> supported source version
+      - requiresPrerequisite  # version -> prerequisite (literal or entity)
+      - deprecatedIn          # feature/version -> version it was deprecated in
+      - removedIn             # feature/version -> version it was removed in
+      - isCompatibleWith      # version/product -> compatible version/product
+      - versionOf             # version -> product

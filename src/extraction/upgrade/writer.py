@@ -1,0 +1,113 @@
+"""Emit upgrade facts to a clean, provenance-bearing Turtle file (stage 6).
+
+Deliberately independent of the heavyweight ``TurtleWriter`` (which runs the
+ontology-proposal workflow): the upgrade funnel targets a fixed two-class
+ontology, so emission is a direct, side-effect-free serialization.
+"""
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+from typing import Iterable
+
+from rdflib import Graph, Literal, URIRef
+from rdflib.namespace import RDF, RDFS
+
+from ...storage.rdf_utils import DOC, KG, ONT, create_entity_uri, create_predicate_uri
+from .schema import (
+    ENTITY_OBJECT_PREDICATES,
+    UPGRADE_PREDICATES,
+    UpgradeFact,
+    dedupe_facts,
+)
+
+_VERSION_HINT = re.compile(r"\d")
+
+# Predicate URIs that represent a core upgrade fact (used to count facts in a
+# graph loaded back from disk on resume).
+_UPGRADE_PRED_URIS = frozenset(create_predicate_uri(p) for p in UPGRADE_PREDICATES)
+
+
+def _type_uri(name: str) -> URIRef:
+    """Type a surface string: anything containing a digit is a version."""
+    return ONT.SoftwareVersion if _VERSION_HINT.search(name) else ONT.Product
+
+
+def _source_node(source: str) -> URIRef:
+    if source.startswith(("http://", "https://")):
+        return URIRef(source)
+    return DOC[source.replace(" ", "_")]
+
+
+def _add_entity(graph: Graph, name: str, source: str) -> URIRef:
+    uri = create_entity_uri(name)
+    graph.add((uri, RDF.type, _type_uri(name)))
+    graph.add((uri, RDFS.label, Literal(name)))
+    if source:
+        graph.add((uri, DOC.sourceDocument, _source_node(source)))
+    return uri
+
+
+def _bind_namespaces(graph: Graph) -> None:
+    graph.bind("kg", KG)
+    graph.bind("ont", ONT)
+    graph.bind("doc", DOC)
+    graph.bind("rdfs", RDFS)
+
+
+def new_graph() -> Graph:
+    """An empty, namespace-bound upgrade graph."""
+    graph = Graph()
+    _bind_namespaces(graph)
+    return graph
+
+
+def add_facts(graph: Graph, facts: Iterable[UpgradeFact]) -> Graph:
+    """Merge facts into ``graph``. Idempotent: re-adding a triple is a no-op."""
+    for fact in dedupe_facts(facts):
+        subj = _add_entity(graph, fact.subject, fact.source)
+        pred = create_predicate_uri(fact.predicate)
+        if fact.predicate in ENTITY_OBJECT_PREDICATES:
+            obj = _add_entity(graph, fact.object, fact.source)
+        else:
+            obj = Literal(fact.object)
+        graph.add((subj, pred, obj))
+    return graph
+
+
+def build_graph(facts: Iterable[UpgradeFact]) -> Graph:
+    return add_facts(new_graph(), facts)
+
+
+def load_graph(output_path: str) -> Graph:
+    """Load an existing TTL into a bound graph, or return a fresh one (resume)."""
+    graph = new_graph()
+    path = Path(output_path)
+    if path.exists():
+        graph.parse(str(path), format="turtle")
+    return graph
+
+
+def count_facts(graph: Graph) -> int:
+    """Number of core upgrade-fact triples currently in the graph."""
+    return sum(1 for _, predicate, _ in graph if predicate in _UPGRADE_PRED_URIS)
+
+
+def serialize_graph(graph: Graph, output_path: str) -> str:
+    """Atomically write ``graph`` to ``output_path`` (temp file + rename)."""
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    graph.serialize(destination=str(tmp_path), format="turtle")
+    os.replace(tmp_path, path)
+    return str(path)
+
+
+def write_upgrade_ttl(facts: Iterable[UpgradeFact], output_path: str) -> str:
+    """Serialize deduped upgrade facts to ``output_path``; return that path.
+
+    Writes to a temp file and atomically renames, so an interrupted incremental
+    save can never leave a half-written TTL behind.
+    """
+    return serialize_graph(build_graph(facts), output_path)

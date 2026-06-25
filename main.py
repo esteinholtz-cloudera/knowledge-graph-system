@@ -38,6 +38,67 @@ from src.services import (
 
 _PROJECT_ROOT = Path(__file__).parent
 
+
+def _collect_upgrade_sources(args) -> list:
+    """Assemble source URLs/files from sitemap, --url, --urls-file, --input."""
+    from src.extraction.upgrade.runner import scope
+
+    sources = list(args.url) + list(args.input)
+    if args.urls_file:
+        text = Path(args.urls_file).read_text(encoding="utf-8")
+        sources += [line.strip() for line in text.splitlines() if line.strip()]
+    if args.sitemap:
+        sources += scope(args.sitemap, limit=args.limit)
+    return list(dict.fromkeys(sources))
+
+
+def _run_upgrade(args) -> None:
+    from src.extraction.upgrade import run_upgrade_extraction
+    from src.extraction.upgrade.runner import scope
+
+    if args.up_command == "scope":
+        urls = scope(args.sitemap, limit=args.limit)
+        if args.out:
+            Path(args.out).write_text("\n".join(urls) + "\n", encoding="utf-8")
+            print(f"Wrote {len(urls)} upgrade-relevant URL(s) to {args.out}")
+        else:
+            print("\n".join(urls))
+            print(f"\n{len(urls)} upgrade-relevant URL(s)")
+        return
+
+    if args.up_command != "extract":
+        print("Usage: upgrade {scope|extract} ...")
+        return
+
+    sources = _collect_upgrade_sources(args)
+    if not sources:
+        print("No sources. Provide --sitemap, --url, --urls-file, or --input.")
+        sys.exit(1)
+    print(f"Funnel input: {len(sources)} source(s). LLM: {'off' if args.no_llm else 'on'}")
+
+    def _on_progress(p) -> None:
+        print(
+            f"[{p.index}/{p.total}] {p.status}: {p.source} "
+            f"(facts so far: {p.fact_count}, saved to {args.output})"
+        )
+
+    result = run_upgrade_extraction(
+        sources, args.output, use_llm=not args.no_llm,
+        on_progress=_on_progress, resume=not args.restart,
+    )
+    print(
+        f"Pages processed: {result.pages} "
+        f"(skipped {result.skipped_duplicates} duplicate(s), "
+        f"{result.already_done} already done)\n"
+        f"Chunks: {result.chunks_gated} sent to LLM of {result.chunks_total} total "
+        f"({result.chunks_total - result.chunks_gated} gated out, zero tokens)\n"
+        f"Facts: {result.fact_count} total in TTL — {result.table_facts} from tables, "
+        f"{result.llm_facts} from LLM this run (pre-dedupe)\n"
+        f"TTL written to: {result.output_path}\n"
+        f"Progress manifest: {result.manifest_path or '(none)'}"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Knowledge Graph System")
     subparsers = parser.add_subparsers(dest="command")
@@ -112,6 +173,26 @@ def main():
     pr_reg.add_argument("--force", action="store_true", help="Overwrite existing prompt files")
     pr_list = pr_sub.add_parser("list", help="List prompt instances on disk")
     pr_list.add_argument("--model", default=None, help="Filter to one model directory")
+
+    up_p = subparsers.add_parser(
+        "upgrade",
+        help="Token-conservative extraction of product upgrade facts into TTL",
+    )
+    up_sub = up_p.add_subparsers(dest="up_command")
+    up_scope = up_sub.add_parser("scope", help="List upgrade-relevant URLs from a sitemap")
+    up_scope.add_argument("--sitemap", required=True, help="Sitemap (or sitemap-index) URL")
+    up_scope.add_argument("--limit", type=int, default=0, help="Cap number of URLs (0 = all)")
+    up_scope.add_argument("--out", default=None, help="Write URLs to this file (one per line)")
+
+    up_ext = up_sub.add_parser("extract", help="Run the upgrade funnel and write TTL")
+    up_ext.add_argument("--sitemap", default=None, help="Scope sources from this sitemap URL")
+    up_ext.add_argument("--limit", type=int, default=0, help="Cap sitemap-scoped URLs (0 = all)")
+    up_ext.add_argument("--url", action="append", default=[], help="Source URL (repeatable)")
+    up_ext.add_argument("--urls-file", default=None, help="File of source URLs (one per line)")
+    up_ext.add_argument("--input", action="append", default=[], help="Local HTML/text file (repeatable)")
+    up_ext.add_argument("--no-llm", action="store_true", help="Deterministic tables only (zero tokens)")
+    up_ext.add_argument("--restart", action="store_true", help="Ignore saved progress; start a fresh run")
+    up_ext.add_argument("--output", default="data/knowledge_graphs/upgrade.ttl")
 
     args = parser.parse_args()
 
@@ -229,6 +310,11 @@ def main():
         else:
             bm_p.print_help()
 
+    elif args.command == "upgrade":
+        if args.up_command:
+            _run_upgrade(args)
+        else:
+            up_p.print_help()
     elif args.command == "prompts":
         store = PromptStore(_PROJECT_ROOT)
         config = load_config(str(_PROJECT_ROOT / "config" / "config.yaml"))
