@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 from .json_utils import extract_json
 from .llm_client import LLMClient
 from .prompt_builder import build_entity_prompts
+from .prompt_store import PromptStore
 from .prompts import ENTITY_EXTRACTION_SYSTEM_PROMPT, ENTITY_EXTRACTION_USER_PROMPT
 
 if TYPE_CHECKING:
@@ -25,10 +26,16 @@ class EntityExtractor:
         llm_client: Optional[LLMClient] = None,
         llm_cfg: Optional["LLMSettings"] = None,
         domain: Optional["DomainSettings"] = None,
+        domain_name: str = "default",
+        model_name: str = "",
+        prompt_store: Optional[PromptStore] = None,
     ):
         self.llm_client = llm_client or LLMClient.from_config()
         self._llm_cfg = llm_cfg
         self._domain = domain
+        self._domain_name = domain_name
+        self._model_name = model_name
+        self._prompt_store = prompt_store
 
     def extract(self, text: str, progress_label: Optional[str] = None) -> List[Dict]:
         """
@@ -38,8 +45,17 @@ class EntityExtractor:
             List of dicts with 'entity', 'type', and optionally 'context'.
         """
         if self._llm_cfg and self._domain:
-            system_prompt, user_template = build_entity_prompts(self._llm_cfg, self._domain)
-            user_prompt = user_template.format(text=text)
+            if self._prompt_store:
+                system_prompt, user_layout = self._prompt_store.load_entity_prompts(
+                    model_name=self._model_name or "_default",
+                    domain_name=self._domain_name,
+                    llm_cfg=self._llm_cfg,
+                    domain=self._domain,
+                )
+                user_prompt = user_layout.with_text(text)
+            else:
+                system_prompt, user_template = build_entity_prompts(self._llm_cfg, self._domain)
+                user_prompt = user_template.format(text=text)
         else:
             system_prompt = ENTITY_EXTRACTION_SYSTEM_PROMPT
             user_prompt = ENTITY_EXTRACTION_USER_PROMPT.format(text=text)

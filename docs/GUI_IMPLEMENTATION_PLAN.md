@@ -2,6 +2,8 @@
 
 Actionable build plan derived from [GUI_API_PLAN.md](./GUI_API_PLAN.md). Use ticket IDs (`KG-###`) in commits and PRs.
 
+**Scope:** Ingestion bounded context only (repo root). Reasoning design lives under [`reasoning/`](../reasoning/) — see [CONTEXT-MAP.md](../CONTEXT-MAP.md).
+
 **Prerequisites:** Python 3.8+, `uv sync`, existing tests green (`uv run pytest`).
 
 **Dependency policy:** No Celery/Redis in Phases 1–4. Reuse Flask + Pydantic already in `pyproject.toml`.

@@ -11,6 +11,7 @@ from src.document.processor import DocumentProcessor
 from src.extraction.entity_extractor import EntityExtractor, ExtractionError
 from src.extraction.entity_resolver import EntityResolver
 from src.extraction.llm_errors import LLMError
+from src.extraction.prompt_store import PromptStore
 from src.extraction.relationship_extractor import RelationshipExtractor
 from src.services.artifacts import ArtifactService
 from src.services.jobs import JobCancelled
@@ -218,10 +219,16 @@ class PipelineService:
             llm_client=entity_extractor.llm_client,
             llm_cfg=llm_cfg,
             domain=domain_cfg,
+            domain_name=options.domain,
+            model_name=resolved_model,
+            prompt_store=PromptStore(self.project_root),
         )
         relationship_extractor = self._relationship_extractor_factory(
             llm_cfg=llm_cfg,
             domain=domain_cfg,
+            domain_name=options.domain,
+            model_name=resolved_model,
+            prompt_store=PromptStore(self.project_root),
         )
 
         processor = self._document_processor_factory(
@@ -249,6 +256,13 @@ class PipelineService:
         ))
 
         bench = create_benchmark_store()
+        prompt_store = PromptStore(self.project_root)
+        run_snapshot = prompt_store.snapshot_for_run(
+            model_name=resolved_model,
+            domain_name=options.domain,
+            llm_cfg=llm_cfg,
+            domain=domain_cfg,
+        )
         run_id = bench.start_run(
             document_filename=doc_data["filename"],
             document_id=document_id,
@@ -258,6 +272,7 @@ class PipelineService:
             resolution_enabled=app_config.entity_resolution.enabled,
             resolution_strategies=list(app_config.entity_resolution.strategies),
             max_chunks=options.max_chunks,
+            run_snapshot_json=PromptStore.snapshot_to_json(run_snapshot),
         )
 
         return _RunContext(

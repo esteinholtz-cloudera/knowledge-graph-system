@@ -1,0 +1,9 @@
+{
+  "max_orphan_rate": 0.10,
+  "max_verbatim_rate": 0.05,
+  "max_other_rate": 0.10,
+  "max_generic_hit_rate": 0.03,
+  "max_error_score": 0.12,
+  "min_grade_score": 85.0,
+  "min_error_score_delta": 0.02
+}

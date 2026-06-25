@@ -43,7 +43,7 @@ When changing the information model, update structures **bottom-up**: domain dic
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Related design docs: [GUI_API_PLAN.md](./GUI_API_PLAN.md), [ONTOLOGY.md](./ONTOLOGY.md), [Benchmark.md](./Benchmark.md).
+Related design docs: [GUI_API_PLAN.md](./GUI_API_PLAN.md), [ONTOLOGY.md](./ONTOLOGY.md), [Benchmark.md](./Benchmark.md). Reasoning is a separate bounded context — see [CONTEXT-MAP.md](../CONTEXT-MAP.md) and [reasoning/docs/](../reasoning/docs/).
 
 ---
 

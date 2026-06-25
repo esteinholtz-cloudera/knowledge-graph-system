@@ -1,6 +1,6 @@
 # GUI & API Execution Plan
 
-Design for exposing the knowledge-graph pipeline to a GUI (or any HTTP client) without wrapping CLI subprocesses. The CLI remains a thin client over the same service layer.
+Design for exposing the **Ingestion** pipeline to a GUI (or any HTTP client) without wrapping CLI subprocesses. The CLI remains a thin client over the same service layer. Reasoning is out of scope — see [CONTEXT-MAP.md](../CONTEXT-MAP.md) and [reasoning/](../reasoning/).
 
 **Implementation breakdown (tickets, file list, week-by-week order):** [GUI_IMPLEMENTATION_PLAN.md](./GUI_IMPLEMENTATION_PLAN.md)
 

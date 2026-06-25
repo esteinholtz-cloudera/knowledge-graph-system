@@ -1,5 +1,6 @@
 """Benchmark metrics display and management."""
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.storage.benchmark_store import (
@@ -67,6 +68,17 @@ class BenchmarkService:
         bench = create_benchmark_store()
         bench.clear()
         bench.close()
+
+    def restore_run(self, run_id: str, project_root: Path) -> Dict[str, Any]:
+        bench = create_benchmark_store()
+        try:
+            snapshot = bench.get_run_snapshot(run_id)
+            if snapshot is None:
+                raise ValueError(f"No prompt snapshot stored for run {run_id}")
+            prompts_dir = bench.restore_run_snapshot(run_id, project_root)
+            return {"run_id": run_id, "prompts_dir": str(prompts_dir), "snapshot": snapshot}
+        finally:
+            bench.close()
 
     def as_json(self, table: TableResult) -> Dict[str, Any]:
         return {
