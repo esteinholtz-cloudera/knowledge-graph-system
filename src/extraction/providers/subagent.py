@@ -73,6 +73,7 @@ class SubagentProvider(LLMProviderBase):
         try:
             completed = subprocess.run(
                 cmd,
+                stdin=subprocess.DEVNULL,  # headless --print blocks on an open stdin
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_seconds,

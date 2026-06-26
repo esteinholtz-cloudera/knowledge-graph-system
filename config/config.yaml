@@ -7,7 +7,8 @@ llm:
   # null = auto-detect: uses the first model currently loaded in LM Studio
   # (actual model name is still logged in benchmark data)
   # For provider: subagent, model is passed to `cursor-agent --model`
-  # (e.g. sonnet-4, gpt-5); null lets the subagent pick its default.
+  # using an id from `cursor-agent --list-models` (e.g. claude-4-sonnet,
+  # gemini-3-flash); null lets the subagent use its current default.
   model: null
   #model: gemma-4-26b-a4b-it-mlx
   #model: qwen3-30b-a3b-instruct-2507-mlx

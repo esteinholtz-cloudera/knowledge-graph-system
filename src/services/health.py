@@ -117,6 +117,15 @@ class HealthService:
 
         return PrecheckResult(ok=all_ok, checks=checks)
 
+    @staticmethod
+    def _clean_cli_output(text: str) -> str:
+        """Strip ANSI escapes and return the last meaningful line of CLI output."""
+        import re
+
+        plain = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text or "")
+        lines = [ln.strip(" \t✓✗") for ln in plain.splitlines() if ln.strip(" \t✓✗")]
+        return lines[-1] if lines else ""
+
     def _check_subagent(self, llm) -> PrecheckResult:
         """Preflight for the subagent provider: CLI present and authenticated."""
         import shutil
@@ -136,14 +145,20 @@ class HealthService:
 
         try:
             result = subprocess.run(
-                [cli, "status"], capture_output=True, text=True, timeout=15
+                [cli, "status"],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             authed = result.returncode == 0
+            message = self._clean_cli_output(result.stdout or result.stderr) or (
+                "authenticated" if authed else "not authenticated"
+            )
             checks.append({
                 "name": "subagent_auth",
                 "ok": authed,
-                "message": (result.stdout or result.stderr or "").strip()
-                or ("authenticated" if authed else "not authenticated"),
+                "message": message,
                 **({} if authed else {"hint": f"run `{cli} login`"}),
             })
         except Exception as e:  # noqa: BLE001 — surface any CLI failure to the user
