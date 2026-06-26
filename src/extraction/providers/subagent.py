@@ -28,12 +28,14 @@ class SubagentProvider(LLMProviderBase):
         timeout_seconds: int = 120,
         mode: str = "ask",
         workspace: Optional[str] = None,
+        trust: bool = True,
     ):
         self._configured_model = model  # None = let the subagent pick its default
         self.cli_path = cli_path
         self.timeout_seconds = timeout_seconds
         self.mode = mode
         self.workspace = workspace
+        self.trust = trust
 
     @property
     def model(self) -> str:
@@ -42,6 +44,8 @@ class SubagentProvider(LLMProviderBase):
 
     def _build_command(self, full_prompt: str) -> List[str]:
         cmd = [self.cli_path, "--print", "--output-format", "text"]
+        if self.trust:
+            cmd.append("--trust")
         if self.mode:
             cmd += ["--mode", self.mode]
         if self._configured_model:

@@ -143,6 +143,10 @@ def _migrate_runs_schema(con: "duckdb.DuckDBPyConnection") -> None:
     existing = {row[0] for row in con.execute("DESCRIBE runs").fetchall()}
     if "run_snapshot_json" not in existing:
         con.execute("ALTER TABLE runs ADD COLUMN run_snapshot_json TEXT")
+    if "tokens_in_total" not in existing:
+        con.execute("ALTER TABLE runs ADD COLUMN tokens_in_total INTEGER")
+    if "tokens_out_total" not in existing:
+        con.execute("ALTER TABLE runs ADD COLUMN tokens_out_total INTEGER")
 
 
 class NullBenchmarkStore:
@@ -272,6 +276,18 @@ class BenchmarkStore:
         elapsed_s: float,
         proposals: int,
     ):
+        token_row = self._con.execute(
+            """
+            SELECT
+                coalesce(sum(tokens_in_approx), 0),
+                coalesce(sum(tokens_out_approx), 0)
+            FROM llm_calls
+            WHERE run_id = ?
+            """,
+            [run_id],
+        ).fetchone()
+        tokens_in_total = int(token_row[0]) if token_row else 0
+        tokens_out_total = int(token_row[1]) if token_row else 0
         self._con.execute(
             """
             UPDATE runs SET
@@ -281,7 +297,9 @@ class BenchmarkStore:
                 entities_resolved  = ?,
                 triples            = ?,
                 elapsed_s          = ?,
-                proposals          = ?
+                proposals          = ?,
+                tokens_in_total    = ?,
+                tokens_out_total   = ?
             WHERE run_id = ?
             """,
             [
@@ -292,6 +310,8 @@ class BenchmarkStore:
                 triples,
                 elapsed_s,
                 proposals,
+                tokens_in_total,
+                tokens_out_total,
                 run_id,
             ],
         )
@@ -525,6 +545,8 @@ class BenchmarkStore:
             proposals,
             round(elapsed_s, 1)                       AS elapsed_s,
             llm_model                                 AS model,
+            tokens_in_total                           AS tokens_in,
+            tokens_out_total                          AS tokens_out,
             (run_snapshot_json IS NOT NULL)           AS snapshot,
             CASE WHEN resolution_enabled
                  THEN (SELECT string_agg(strategy, '→' ORDER BY position)
@@ -555,7 +577,9 @@ class BenchmarkStore:
             r.document_filename AS document,
             l.stage,
             l.chunk_number      AS chunk,
-            round(l.elapsed_s, 1) AS elapsed_s
+            round(l.elapsed_s, 1) AS elapsed_s,
+            l.tokens_in_approx  AS tokens_in,
+            l.tokens_out_approx AS tokens_out
         FROM llm_calls l
         JOIN runs r USING (run_id)
         ORDER BY r.started_at DESC, l.chunk_number, l.stage

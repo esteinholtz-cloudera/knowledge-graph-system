@@ -364,8 +364,11 @@ class PipelineService:
 
         def on_done(index: int, entities: List[dict], elapsed: float) -> None:
             chunk_num = index + 1
+            usage = ctx.entity_extractor.llm_client.last_token_usage
             ctx.bench.record_llm_call(
                 ctx.run_id, "entity_extraction", elapsed, chunk_number=chunk_num,
+                tokens_in_approx=usage.tokens_in,
+                tokens_out_approx=usage.tokens_out,
             )
             all_entities.extend(entities)
             chunk_entity_counts.append(len(entities))
@@ -494,8 +497,11 @@ class PipelineService:
 
         def rel_on_done(index: int, triples: List[dict], elapsed: float) -> None:
             chunk_num = index + 1
+            usage = ctx.relationship_extractor.llm_client.last_token_usage
             ctx.bench.record_llm_call(
                 ctx.run_id, "relationship_extraction", elapsed, chunk_number=chunk_num,
+                tokens_in_approx=usage.tokens_in,
+                tokens_out_approx=usage.tokens_out,
             )
             self._merge_triples(triples, canonical_lookup, all_triples_set, all_triples)
             ctx.bench.record_chunk(
@@ -590,11 +596,14 @@ class PipelineService:
                 progress_label=f"section {sec_num}/{len(sections)} · relationships",
             )
             elapsed = time.monotonic() - t0
+            usage = ctx.relationship_extractor.llm_client.last_token_usage
             ctx.bench.record_llm_call(
                 ctx.run_id,
                 "section_relationship_extraction",
                 elapsed,
                 chunk_number=sec_num,
+                tokens_in_approx=usage.tokens_in,
+                tokens_out_approx=usage.tokens_out,
             )
             new_count = self._merge_triples(
                 triples, canonical_lookup, all_triples_set, all_triples,

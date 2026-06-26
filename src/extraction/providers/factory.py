@@ -52,6 +52,7 @@ def create_provider(settings: LLMSettings) -> LLMProviderBase:
             cli_path=settings.subagent_cli,
             timeout_seconds=settings.timeout_seconds,
             mode=settings.subagent_mode,
+            trust=settings.subagent_trust,
         )
 
     raise ValueError(f"Unknown LLM provider: {provider}")
