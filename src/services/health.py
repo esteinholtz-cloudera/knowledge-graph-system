@@ -16,6 +16,10 @@ class HealthService:
         checks: List[Dict[str, Any]] = []
         all_ok = True
 
+        # Subagent provider has no HTTP endpoint — check the CLI + auth instead.
+        if llm.provider == "subagent":
+            return self._check_subagent(llm)
+
         headers: Dict[str, str] = {}
         if llm.get_api_key():
             headers["Authorization"] = f"Bearer {llm.get_api_key()}"
@@ -112,3 +116,62 @@ class HealthService:
             })
 
         return PrecheckResult(ok=all_ok, checks=checks)
+
+    @staticmethod
+    def _clean_cli_output(text: str) -> str:
+        """Strip ANSI escapes and return the last meaningful line of CLI output."""
+        import re
+
+        plain = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text or "")
+        lines = [ln.strip(" \t✓✗") for ln in plain.splitlines() if ln.strip(" \t✓✗")]
+        return lines[-1] if lines else ""
+
+    def _check_subagent(self, llm) -> PrecheckResult:
+        """Preflight for the subagent provider: CLI present and authenticated."""
+        import shutil
+        import subprocess
+
+        checks: List[Dict[str, Any]] = []
+        cli = llm.subagent_cli
+
+        if not shutil.which(cli) and "/" not in cli:
+            checks.append({
+                "name": "subagent_cli",
+                "ok": False,
+                "message": f"{cli!r} not found on PATH",
+                "hint": "install the Cursor CLI or set llm.subagent_cli in config.yaml",
+            })
+            return PrecheckResult(ok=False, checks=checks)
+
+        try:
+            result = subprocess.run(
+                [cli, "status"],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            authed = result.returncode == 0
+            message = self._clean_cli_output(result.stdout or result.stderr) or (
+                "authenticated" if authed else "not authenticated"
+            )
+            checks.append({
+                "name": "subagent_auth",
+                "ok": authed,
+                "message": message,
+                **({} if authed else {"hint": f"run `{cli} login`"}),
+            })
+        except Exception as e:  # noqa: BLE001 — surface any CLI failure to the user
+            checks.append({
+                "name": "subagent_auth",
+                "ok": False,
+                "message": str(e),
+            })
+            return PrecheckResult(ok=False, checks=checks)
+
+        checks.append({
+            "name": "llm_model",
+            "ok": True,
+            "message": llm.model or "subagent default",
+        })
+        return PrecheckResult(ok=all(c["ok"] for c in checks), checks=checks)

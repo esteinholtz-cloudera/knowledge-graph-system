@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 
-LLMProvider = Literal["ollama", "lmstudio", "openai", "anthropic", "gemini"]
+LLMProvider = Literal["ollama", "lmstudio", "openai", "anthropic", "gemini", "subagent"]
 
 
 class ModelOverrides(BaseModel):
@@ -76,6 +76,11 @@ class LLMSettings(BaseModel):
     temperature: float = 0.3
     max_new_tokens: int = 512
     disable_thinking: bool = False
+    # --- subagent provider ---
+    # Used only when provider == "subagent". The Cursor subagent becomes the LLM:
+    # whatever model the subagent runs is the model used for generation.
+    subagent_cli: str = "cursor-agent"  # CLI binary (on PATH or absolute path)
+    subagent_mode: Literal["ask", "plan", "agent"] = "ask"  # ask = read-only Q&A
     # Default chunk settings — words per extraction call.
     # Override per model in model_settings below.
     chunk_size: int = 300

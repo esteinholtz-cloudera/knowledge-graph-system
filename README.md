@@ -16,7 +16,7 @@ Edit [`config/config.yaml`](config/config.yaml). Default is local **Ollama**:
 
 ```yaml
 llm:
-  provider: ollama    # ollama | lmstudio | openai | anthropic | gemini
+  provider: ollama    # ollama | lmstudio | openai | anthropic | gemini | subagent
   model: llama3.2     # must match a model you have pulled / loaded
 ```
 
@@ -25,6 +25,7 @@ llm:
 | `ollama` | Run Ollama; default API `http://localhost:11434/v1` |
 | `lmstudio` | Start a model in LM Studio; default `http://localhost:1234/v1` |
 | `openai` / `anthropic` / `gemini` | Set API key env var (see [`.env.example`](.env.example)) |
+| `subagent` | Use a Cursor subagent as the LLM via the `cursor-agent` CLI. Install the [Cursor CLI](https://docs.cursor.com/en/cli/overview) and run `cursor-agent login`. `model` maps to `cursor-agent --model` (use an id from `cursor-agent --list-models`, e.g. `claude-4-sonnet`); leave `null` for the subagent default. |
 
 Verify config (no LLM call):
 

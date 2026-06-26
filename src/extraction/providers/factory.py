@@ -5,6 +5,7 @@ from .anthropic import AnthropicProvider
 from .base import LLMProviderBase
 from .gemini import GeminiProvider
 from .openai_compatible import OpenAICompatibleProvider
+from .subagent import SubagentProvider
 
 
 def create_provider(settings: LLMSettings) -> LLMProviderBase:
@@ -43,6 +44,14 @@ def create_provider(settings: LLMSettings) -> LLMProviderBase:
             model=settings.model,
             api_key=api_key,
             timeout_seconds=settings.timeout_seconds,
+        )
+
+    if provider == "subagent":
+        return SubagentProvider(
+            model=settings.model,
+            cli_path=settings.subagent_cli,
+            timeout_seconds=settings.timeout_seconds,
+            mode=settings.subagent_mode,
         )
 
     raise ValueError(f"Unknown LLM provider: {provider}")

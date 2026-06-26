@@ -2,10 +2,13 @@
 
 # LLM Configuration
 llm:
-  # ollama | lmstudio | openai | anthropic | gemini
+  # ollama | lmstudio | openai | anthropic | gemini | subagent
   provider: lmstudio
   # null = auto-detect: uses the first model currently loaded in LM Studio
   # (actual model name is still logged in benchmark data)
+  # For provider: subagent, model is passed to `cursor-agent --model`
+  # using an id from `cursor-agent --list-models` (e.g. claude-4-sonnet,
+  # gemini-3-flash); null lets the subagent use its current default.
   model: null
   #model: gemma-4-26b-a4b-it-mlx
   #model: qwen3-30b-a3b-instruct-2507-mlx
@@ -20,6 +23,10 @@ llm:
   # Prepend /no_think to disable extended reasoning on thinking models (qwen3, etc.)
   # Prevents token exhaustion before the JSON answer is emitted.
   disable_thinking: true
+  # provider: subagent settings — runs the Cursor CLI as the LLM backend.
+  # The subagent is the LLM (it owns sampling params); requires `cursor-agent login`.
+  subagent_cli: cursor-agent   # CLI binary on PATH, or an absolute path
+  subagent_mode: ask           # ask = read-only Q&A | plan | agent
   # Default chunk settings — used when no model-specific override exists.
   # Words per extraction call. Smaller = better coverage (avoids "lost in the middle"),
   # more LLM calls. Tune per model based on observed extraction quality.
