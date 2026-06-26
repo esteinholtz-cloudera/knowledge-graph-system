@@ -123,11 +123,33 @@ def _terminate(procs: list[subprocess.Popen]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Start knowledge-graph dev servers")
+    parser.add_argument(
+        "-c",
+        "--set",
+        action="append",
+        dest="config_set",
+        metavar="KEY=VALUE",
+        default=[],
+        help="Override config.yaml (dotted keys). Repeatable.",
+    )
     parser.add_argument("--api-only", action="store_true", help="Start API only")
     parser.add_argument("--gui-only", action="store_true", help="Start GUI only (API must already be running)")
     parser.add_argument("--skip-health-wait", action="store_true", help="Do not wait for API health check")
     parser.add_argument("--no-browser", action="store_true", help="Do not open the GUI in a browser")
     args = parser.parse_args()
+
+    if args.config_set:
+        from pydantic import ValidationError
+
+        from src.config.settings import overrides_from_cli, set_cli_overrides
+
+        try:
+            set_cli_overrides(overrides_from_cli(args.config_set))
+            _load_settings()
+        except ValueError as e:
+            parser.error(str(e))
+        except ValidationError as e:
+            parser.error(f"Invalid config override: {e}")
 
     cfg = _load_settings()
     api_port = cfg.n8n.port
@@ -151,11 +173,11 @@ def main() -> int:
             print(f"API port {api_port} already in use — assuming API is running.")
         else:
             print(f"Starting API on http://127.0.0.1:{api_port} ...")
-            procs.append(
-                _spawn(
-                    ["uv", "run", "python", "main.py", "server"],
-                )
-            )
+            server_cmd = ["uv", "run", "python", "main.py"]
+            for override in args.config_set:
+                server_cmd.extend(["-c", override])
+            server_cmd.append("server")
+            procs.append(_spawn(server_cmd))
             if not args.skip_health_wait and not _wait_for_api(api_port):
                 print(f"API did not become ready on port {api_port} within timeout.", file=sys.stderr)
                 _terminate(procs)

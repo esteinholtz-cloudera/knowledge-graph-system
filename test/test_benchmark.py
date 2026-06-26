@@ -53,8 +53,8 @@ def populated_store(store):
         max_chunks=None,
     )
     store.record_chunk(run_id, 1, 570, 12, 8, 34.5)
-    store.record_llm_call(run_id, "entity_extraction", 18.2, chunk_number=1)
-    store.record_llm_call(run_id, "relationship_extraction", 16.3, chunk_number=1)
+    store.record_llm_call(run_id, "entity_extraction", 18.2, chunk_number=1, tokens_in_approx=500, tokens_out_approx=120)
+    store.record_llm_call(run_id, "relationship_extraction", 16.3, chunk_number=1, tokens_in_approx=600, tokens_out_approx=80)
     store.record_resolution(run_id, "rule_based+embedding", 12, 10, 2.1)
     store.finish_run(run_id, 1, 12, 10, 8, 55.1, 0)
     return store, run_id
@@ -123,6 +123,14 @@ class TestBenchmarkWrite:
             "SELECT entities_before - entities_after AS merges FROM resolution_runs"
         ).fetchone()
         assert row[0] == 2  # 12 - 10
+
+    def test_token_totals_on_finish(self, populated_store):
+        store, run_id = populated_store
+        row = store._con.execute(
+            "SELECT tokens_in_total, tokens_out_total FROM runs WHERE run_id = ?",
+            [run_id],
+        ).fetchone()
+        assert row == (1100, 200)
 
 
 # ---------------------------------------------------------------------------

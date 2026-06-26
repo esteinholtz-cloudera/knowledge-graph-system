@@ -1,10 +1,13 @@
 """Load application settings from config.yaml."""
+import json
 import os
 from pathlib import Path
-from typing import Dict, Literal, List, Optional
+from typing import Any, Dict, Literal, List, Optional
 
 import yaml
 from pydantic import BaseModel, Field
+
+_cli_overrides: Optional[dict] = None
 
 
 LLMProvider = Literal["ollama", "lmstudio", "openai", "anthropic", "gemini", "subagent"]
@@ -81,6 +84,7 @@ class LLMSettings(BaseModel):
     # whatever model the subagent runs is the model used for generation.
     subagent_cli: str = "cursor-agent"  # CLI binary (on PATH or absolute path)
     subagent_mode: Literal["ask", "plan", "agent"] = "ask"  # ask = read-only Q&A
+    subagent_trust: bool = True  # pass --trust for headless runs (no workspace prompt)
     # Default chunk settings — words per extraction call.
     # Override per model in model_settings below.
     chunk_size: int = 300
@@ -214,16 +218,104 @@ class AppSettings(BaseModel):
         return self.domains.get(name, DomainSettings())
 
 
-def load_config(config_path: Optional[str] = None) -> AppSettings:
-    """Load settings from YAML file."""
+def _parse_override_value(raw: str) -> Any:
+    """Parse a CLI override value into a Python object."""
+    s = raw.strip()
+    lower = s.lower()
+    if lower in ("null", "none", "~"):
+        return None
+    if lower in ("true", "yes", "on"):
+        return True
+    if lower in ("false", "no", "off"):
+        return False
+    if s.startswith(("[", "{")):
+        return json.loads(s)
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+        return s[1:-1]
+    try:
+        return int(s, 10)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    return s
+
+
+def _set_nested(target: dict, keys: list[str], value: Any) -> None:
+    cursor = target
+    for key in keys[:-1]:
+        child = cursor.get(key)
+        if not isinstance(child, dict):
+            child = {}
+            cursor[key] = child
+        cursor = child
+    cursor[keys[-1]] = value
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    merged = dict(base)
+    for key, value in override.items():
+        if (
+            key in merged
+            and isinstance(merged[key], dict)
+            and isinstance(value, dict)
+        ):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def overrides_from_cli(pairs: list[str]) -> dict:
+    """Build a nested override dict from KEY=VALUE CLI strings (dotted keys)."""
+    result: dict = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise ValueError(f"Invalid config override (expected KEY=VALUE): {pair!r}")
+        key, _, raw_value = pair.partition("=")
+        key = key.strip()
+        if not key:
+            raise ValueError(f"Invalid config override (empty key): {pair!r}")
+        _set_nested(result, key.split("."), _parse_override_value(raw_value))
+    return result
+
+
+def set_cli_overrides(overrides: dict) -> None:
+    """Apply overrides to subsequent load_config() calls (typically from CLI -c/--set)."""
+    global _cli_overrides
+    _cli_overrides = overrides
+
+
+def clear_cli_overrides() -> None:
+    """Clear CLI overrides (for tests)."""
+    global _cli_overrides
+    _cli_overrides = None
+
+
+def load_config(
+    config_path: Optional[str] = None,
+    overrides: Optional[dict] = None,
+) -> AppSettings:
+    """Load settings from YAML file, with optional CLI/programmatic overrides."""
     if config_path is None:
         root = Path(__file__).parent.parent.parent
         config_path = str(root / "config" / "config.yaml")
     path = Path(config_path)
-    if not path.exists():
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    else:
         import logging
         logging.getLogger(__name__).warning("config.yaml not found at %s — using defaults", path)
-        return AppSettings()
-    with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
+        data = {}
+
+    merged_overrides: dict = {}
+    if _cli_overrides:
+        merged_overrides = _deep_merge(merged_overrides, _cli_overrides)
+    if overrides:
+        merged_overrides = _deep_merge(merged_overrides, overrides)
+    if merged_overrides:
+        data = _deep_merge(data, merged_overrides)
     return AppSettings.model_validate(data)

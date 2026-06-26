@@ -22,7 +22,15 @@ from src.cli.formatters import (
     print_pipeline_summary,
     print_precheck,
 )
-from src.config.settings import DomainSettings, load_config
+from pydantic import ValidationError
+
+from src.config.settings import (
+    DomainSettings,
+    clear_cli_overrides,
+    load_config,
+    overrides_from_cli,
+    set_cli_overrides,
+)
 from src.extraction.entity_extractor import ExtractionError
 from src.extraction.prompt_store import FALLBACK_MODEL, PromptStore
 from src.services import (
@@ -99,8 +107,38 @@ def _run_upgrade(args) -> None:
     )
 
 
+def _apply_cli_config_overrides(config_sets: list[str]) -> None:
+    clear_cli_overrides()
+    if not config_sets:
+        return
+    try:
+        set_cli_overrides(overrides_from_cli(config_sets))
+        load_config(str(_PROJECT_ROOT / "config" / "config.yaml"))
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    except ValidationError as e:
+        raise SystemExit(f"Invalid config override: {e}") from e
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Knowledge Graph System")
+    parent = argparse.ArgumentParser(add_help=False)
+    parent.add_argument(
+        "-c",
+        "--set",
+        action="append",
+        dest="config_set",
+        metavar="KEY=VALUE",
+        default=[],
+        help=(
+            "Override config.yaml (dotted keys, e.g. llm.temperature=0.5). "
+            "Repeatable; values: true/false/null, numbers, JSON, or strings."
+        ),
+    )
+
+    parser = argparse.ArgumentParser(
+        description="Knowledge Graph System",
+        parents=[parent],
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     p = subparsers.add_parser("process", help="Process a document")
@@ -110,10 +148,9 @@ def main():
     p.add_argument("--with-graph", action="store_true", help="Generate graph HTML")
     p.add_argument("--domain", default="default", help="Extraction domain profile")
 
-    server_cfg = load_config(str(_PROJECT_ROOT / "config" / "config.yaml")).n8n
     s = subparsers.add_parser("server", help="Start n8n API server")
-    s.add_argument("--host", default=server_cfg.host)
-    s.add_argument("--port", type=int, default=server_cfg.port)
+    s.add_argument("--host", default=None, help="Default: n8n.host from config")
+    s.add_argument("--port", type=int, default=None, help="Default: n8n.port from config")
     s.add_argument("--debug", action="store_true")
 
     arc_p = subparsers.add_parser("archive", help="Archive data/ and reset")
@@ -195,6 +232,7 @@ def main():
     up_ext.add_argument("--output", default="data/knowledge_graphs/upgrade.ttl")
 
     args = parser.parse_args()
+    _apply_cli_config_overrides(args.config_set)
 
     if args.command == "process":
         if not print_precheck(HealthService().check()):
@@ -216,8 +254,11 @@ def main():
 
     elif args.command == "server":
         from src.api.app import create_app
-        debug = args.debug or server_cfg.debug
-        create_app(_PROJECT_ROOT).run(host=args.host, port=args.port, debug=debug)
+        n8n = load_config(str(_PROJECT_ROOT / "config" / "config.yaml")).n8n
+        host = args.host if args.host is not None else n8n.host
+        port = args.port if args.port is not None else n8n.port
+        debug = args.debug or n8n.debug
+        create_app(_PROJECT_ROOT).run(host=host, port=port, debug=debug)
 
     elif args.command == "archive":
         try:
