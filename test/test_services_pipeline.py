@@ -9,6 +9,7 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+from src.extraction.token_usage import Extracted, TokenUsage
 from src.services.models import PipelineOptions
 from src.services.pipeline import PipelineService
 from src.services.progress import CollectingProgressReporter
@@ -28,16 +29,20 @@ def fixture_doc(tmp_path):
 
 
 def _mock_entities():
-    return [
-        {"entity": "Alice", "type": "Person"},
-        {"entity": "Acme Corp", "type": "Organization"},
-    ]
+    return Extracted(
+        [
+            {"entity": "Alice", "type": "Person"},
+            {"entity": "Acme Corp", "type": "Organization"},
+        ],
+        TokenUsage(tokens_in=100, tokens_out=20),
+    )
 
 
 def _mock_triples():
-    return [
-        {"subject": "Alice", "predicate": "worksAt", "object": "Acme Corp"},
-    ]
+    return Extracted(
+        [{"subject": "Alice", "predicate": "worksAt", "object": "Acme Corp"}],
+        TokenUsage(tokens_in=120, tokens_out=15),
+    )
 
 
 @patch("src.services.pipeline.create_benchmark_store")

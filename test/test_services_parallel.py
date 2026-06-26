@@ -10,6 +10,7 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+from src.extraction.token_usage import Extracted, TokenUsage
 from src.services.models import PipelineOptions
 from src.services.pipeline import PipelineService
 from src.services.progress import CollectingProgressReporter
@@ -43,14 +44,17 @@ def test_parallel_faster_than_sequential(
 ):
     def slow_extract(chunk, progress_label=None):
         time.sleep(SLEEP_S)
-        return [{"entity": f"E-{progress_label}", "type": "Thing"}]
+        return Extracted(
+            [{"entity": f"E-{progress_label}", "type": "Thing"}],
+            TokenUsage(tokens_in=10, tokens_out=5),
+        )
 
     mock_entity = MagicMock()
     mock_entity.llm_client._provider.model = "test-model"
     mock_entity.extract.side_effect = slow_extract
 
     mock_rel = MagicMock()
-    mock_rel.extract.side_effect = lambda *a, **k: []
+    mock_rel.extract.side_effect = lambda *a, **k: Extracted([], TokenUsage())
 
     mock_doc = MagicMock()
     mock_doc.process_document.return_value = {

@@ -13,13 +13,21 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.config.settings import (  # noqa: E402 — ROOT must be on sys.path first
+    ConfigOverrideError,
+    add_override_arg,
+    apply_cli_overrides,
+    load_config,
+)
+
+_CONFIG_PATH = str(ROOT / "config" / "config.yaml")
 
 
 def _load_settings():
-    sys.path.insert(0, str(ROOT))
-    from src.config.settings import load_config
-
-    return load_config(str(ROOT / "config" / "config.yaml"))
+    return load_config(_CONFIG_PATH)
 
 
 def _wait_for_url(url: str, timeout_s: float = 30.0) -> bool:
@@ -123,33 +131,17 @@ def _terminate(procs: list[subprocess.Popen]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Start knowledge-graph dev servers")
-    parser.add_argument(
-        "-c",
-        "--set",
-        action="append",
-        dest="config_set",
-        metavar="KEY=VALUE",
-        default=[],
-        help="Override config.yaml (dotted keys). Repeatable.",
-    )
+    add_override_arg(parser)
     parser.add_argument("--api-only", action="store_true", help="Start API only")
     parser.add_argument("--gui-only", action="store_true", help="Start GUI only (API must already be running)")
     parser.add_argument("--skip-health-wait", action="store_true", help="Do not wait for API health check")
     parser.add_argument("--no-browser", action="store_true", help="Do not open the GUI in a browser")
     args = parser.parse_args()
 
-    if args.config_set:
-        from pydantic import ValidationError
-
-        from src.config.settings import overrides_from_cli, set_cli_overrides
-
-        try:
-            set_cli_overrides(overrides_from_cli(args.config_set))
-            _load_settings()
-        except ValueError as e:
-            parser.error(str(e))
-        except ValidationError as e:
-            parser.error(f"Invalid config override: {e}")
+    try:
+        apply_cli_overrides(args.config_set, _CONFIG_PATH)
+    except ConfigOverrideError as e:
+        parser.error(str(e))
 
     cfg = _load_settings()
     api_port = cfg.n8n.port

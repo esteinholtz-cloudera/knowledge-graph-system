@@ -39,7 +39,7 @@ def test_live_generate():
     print("\nLive LLM test")
     print("=" * 40)
     print(f"Sending prompt: {prompt!r}")
-    response = client.generate(prompt=prompt, max_new_tokens=16)
+    response = client.generate(prompt=prompt, max_new_tokens=16).text
     print(f"Response: {response!r}")
     print("=" * 40)
     print("Live generate: OK")

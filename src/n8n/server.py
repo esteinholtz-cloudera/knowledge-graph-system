@@ -14,38 +14,26 @@ app = create_app(project_root)
 if __name__ == "__main__":
     import argparse
 
-    from pydantic import ValidationError
-
     from src.config.settings import (
+        ConfigOverrideError,
+        add_override_arg,
+        apply_cli_overrides,
         load_config,
-        overrides_from_cli,
-        set_cli_overrides,
     )
 
+    config_path = str(project_root / "config" / "config.yaml")
     parser = argparse.ArgumentParser(description="Knowledge Graph API Server")
-    parser.add_argument(
-        "-c",
-        "--set",
-        action="append",
-        dest="config_set",
-        metavar="KEY=VALUE",
-        default=[],
-        help="Override config.yaml (dotted keys). Repeatable.",
-    )
+    add_override_arg(parser)
     parser.add_argument("--host", default=None, help="Default: n8n.host from config")
     parser.add_argument("--port", type=int, default=None, help="Default: n8n.port from config")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
-    if args.config_set:
-        try:
-            set_cli_overrides(overrides_from_cli(args.config_set))
-            load_config(str(project_root / "config" / "config.yaml"))
-        except ValueError as e:
-            parser.error(str(e))
-        except ValidationError as e:
-            parser.error(f"Invalid config override: {e}")
+    try:
+        apply_cli_overrides(args.config_set, config_path)
+    except ConfigOverrideError as e:
+        parser.error(str(e))
 
-    cfg = load_config(str(project_root / "config" / "config.yaml")).n8n
+    cfg = load_config(config_path).n8n
     host = args.host if args.host is not None else cfg.host
     port = args.port if args.port is not None else cfg.port
     debug = args.debug or cfg.debug

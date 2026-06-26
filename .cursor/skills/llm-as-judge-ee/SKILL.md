@@ -1,6 +1,6 @@
 ---
 name: llm-as-judge-ee
-description: Evaluates entity extraction quality in the knowledge-graph-system pipeline by analyzing markup HTML against source text, computing coverage/precision metrics, logging grade and prompt snapshots to the benchmark DuckDB, classifying failure modes, and optionally optimizing scoped entity prompts after user confirmation. Use when evaluating entity extraction, reviewing *_markup.html output, tuning entity prompts, or assessing EE quality for a model/domain run.
+description: Evaluates entity extraction quality in the knowledge-graph-system pipeline by listing judgeable markup runs for user selection, analyzing markup HTML against source text, computing coverage/precision metrics, logging grade and prompt snapshots to the benchmark DuckDB, classifying failure modes, and optionally optimizing scoped entity prompts after user confirmation. Use when evaluating entity extraction, reviewing *_markup.html output, tuning entity prompts, or assessing EE quality for a model/domain run.
 ---
 
 # LLM-as-Judge — Entity Extraction (EE)
@@ -17,24 +17,54 @@ Evaluate entity extraction runs in this repo. The judge reads **markup HTML + so
 | Domain config | `config/config.yaml` → `domains.{domain}` |
 | Model settings | `config/config.yaml` → `llm.model_settings.{model}` |
 
-Resolve `{model}` and `{domain}` from the run metadata, benchmark DB, or user.
+Resolve `{model}` and `{domain}` from `list_judgeables.py`, benchmark DB, run metadata, or user.
 
 ## Workflow
 
 ```
 Task Progress:
-- [ ] 1. Locate markup HTML, source text, model, domain
-- [ ] 2. Run analyze_markup.py for baseline metrics
+- [ ] 1. List judgeable runs; user selects one or more (multi-select)
+- [ ] 2. For each selected run: run analyze_markup.py for baseline metrics
 - [ ] 3. Read source + markup samples; spot-check failure modes
 - [ ] 4. Read active entity prompts and domain config
 - [ ] 5. Write evaluation report (template below)
 - [ ] 6. Log evaluation to benchmark DB (grade + metrics + prompts_before)
-- [ ] 7. Ask user whether to optimize relevant prompts
+- [ ] 7. Ask user whether to optimize relevant prompts (per run)
 - [ ] 8. If yes: apply scoped fixes, log prompts_after, suggest re-run extraction
 - [ ] 9. Classify each recommendation: generic / domain / model / document
 ```
 
-### Step 1 — Ground in the pipeline
+### Step 1 — List and select judgeable runs
+
+Discover markup outputs under live `data/documents/` and archived `data_save_*/documents/`:
+
+```bash
+uv run python .cursor/skills/llm-as-judge-ee/scripts/list_judgeables.py
+uv run python .cursor/skills/llm-as-judge-ee/scripts/list_judgeables.py --json
+uv run python .cursor/skills/llm-as-judge-ee/scripts/list_judgeables.py --exclude-judged
+```
+
+Each row includes `id`, `label`, `markup`, `source`, `model`, `domain`, `prompts_dir`, and optional `last_grade` when already judged.
+
+Use **AskQuestion** with `allow_multiple: true`. Present every entry from step 1 (or only `--exclude-judged` when comparing fresh benchmark archives).
+
+Notes when asking:
+
+- Skip entries flagged **missing source** unless the user supplies a path.
+- Re-judging an already-graded run is allowed — a new `ee_judge_evaluations` row is appended.
+- After [llm-benchmark](../llm-benchmark/SKILL.md), archives appear as `data_save_{model}/…` with model/domain from the benchmark manifest or DuckDB `runs.run_snapshot_json`.
+
+Resolve selected ids without re-prompting:
+
+```bash
+uv run python .cursor/skills/llm-as-judge-ee/scripts/list_judgeables.py --json --ids data:ZDU_prereqs data_save_claude-4.6-sonnet-medium:ZDU_prereqs
+```
+
+If the user names a specific markup file or model/document pair instead of ids, map it to the matching `id` from the list output, then continue.
+
+**Loop:** run steps 2–9 below for **each** selected judgeable. Use that entry's `markup`, `source`, `model`, and `domain` — do not reuse paths from a prior iteration.
+
+### Step 2 — Ground in the pipeline
 
 Before judging, confirm how markup is produced:
 
@@ -45,15 +75,17 @@ Before judging, confirm how markup is produced:
 
 See `prompts/README.md` and `docs/PROMPT_TUNING.md`.
 
-### Step 2 — Quantitative baseline
+### Step 3 — Quantitative baseline
+
+Use paths from the selected judgeable entry (`markup`, `source`):
 
 ```bash
 uv run python .cursor/skills/llm-as-judge-ee/scripts/analyze_markup.py \
-  data/documents/ZDU_prereqs_markup.html input/ZDU_prereqs.txt
+  {markup} {source}
 
 # JSON for downstream comparison
 uv run python .cursor/skills/llm-as-judge-ee/scripts/analyze_markup.py \
-  data/documents/ZDU_prereqs_markup.html input/ZDU_prereqs.txt --json
+  {markup} {source} --json
 ```
 
 Key metrics to cite in the report:
@@ -74,7 +106,7 @@ Manual spot-checks the script does **not** cover:
 - Version fragmentation (split product + version spans)
 - Truncated or invented composite spans
 
-### Step 3 — Failure mode taxonomy
+### Step 4 — Failure mode taxonomy
 
 Classify each issue into one bucket (cite 2–3 examples each):
 
@@ -86,7 +118,7 @@ Classify each issue into one bucket (cite 2–3 examples each):
 6. **Redundancy clusters** — abbrev + full form + process variants (`ZDU`, `Zero Downtime Upgrade`, `ZDU process`)
 7. **Pipeline/linking** — orphan entities, resolver canonicalization breaking markup match
 
-### Step 4 — Grade and report
+### Step 5 — Grade and report
 
 Use letter grade with one-line rationale. Rough calibration:
 
@@ -97,7 +129,7 @@ Use letter grade with one-line rationale. Rough calibration:
 | C | Major coverage holes or >30% questionable extractions |
 | D/F | JSON failures, mass generic extraction, or markup mostly unusable |
 
-### Step 5 — Log to benchmark database
+### Step 6 — Log to benchmark database
 
 After grading, persist the evaluation to `data/benchmark.duckdb` (`ee_judge_evaluations` table). Requires `uv sync --extra benchmark`.
 
@@ -108,17 +140,17 @@ After grading, persist the evaluation to `data/benchmark.duckdb` (`ee_judge_eval
 ```bash
 METRICS=$(mktemp)
 uv run python .cursor/skills/llm-as-judge-ee/scripts/analyze_markup.py \
-  data/documents/ZDU_prereqs_markup.html input/ZDU_prereqs.txt --json > "$METRICS"
+  {markup} {source} --json > "$METRICS"
 
 uv run python .cursor/skills/llm-as-judge-ee/scripts/log_ee_evaluation.py \
-  --markup data/documents/ZDU_prereqs_markup.html \
-  --source input/ZDU_prereqs.txt \
-  --model qwen3-30b-a3b-instruct-2507-mlx \
-  --domain technical \
+  --markup {markup} \
+  --source {source} \
+  --model {model} \
+  --domain {domain} \
   --grade "B-" \
   --summary "Usable but noisy; ~29% orphan entities" \
   --metrics-file "$METRICS" \
-  --prompts-dir prompts/qwen3-30b-a3b-instruct-2507-mlx/technical
+  --prompts-dir prompts/{model}/{domain}
 ```
 
 The script auto-links `run_id` from the latest matching `runs` row (same `document_filename` + `llm_model`) when omitted.
@@ -134,7 +166,7 @@ print(BenchmarkStore.EE_JUDGE_SQL)
 
 Stored fields: grade, grade_score, summary, quantitative metrics (`metrics_json`), full prompt snapshots (`prompts_before`, `prompts_after`), `optimization_applied`, optional `run_id` FK.
 
-### Step 6 — Ask about prompt optimization
+### Step 7 — Ask about prompt optimization
 
 **Stop after logging and the report.** Use AskQuestion before editing any prompt files:
 
@@ -152,8 +184,8 @@ If the user accepts:
 
 ```bash
 uv run python .cursor/skills/llm-as-judge-ee/scripts/log_ee_evaluation.py \
-  --eval-id "<eval_id from step 5>" \
-  --prompts-after-dir prompts/qwen3-30b-a3b-instruct-2507-mlx/technical
+  --eval-id "<eval_id from step 6>" \
+  --prompts-after-dir prompts/{model}/{domain}
 ```
 
 4. Tell the user to re-run extraction on the same document and optionally re-evaluate to compare grades across benchmark rows.

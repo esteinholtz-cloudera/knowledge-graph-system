@@ -4,7 +4,7 @@ from typing import List, Optional
 from src.config.settings import LLMSettings, load_config
 from src.extraction.providers.base import LLMProviderBase
 from src.extraction.providers.factory import create_provider
-from src.extraction.token_usage import TokenUsage, approx_tokens
+from src.extraction.token_usage import GenerationResult, TokenUsage, approx_tokens
 
 
 class LLMClient:
@@ -13,11 +13,6 @@ class LLMClient:
     def __init__(self, provider: LLMProviderBase, settings: LLMSettings):
         self._provider = provider
         self._settings = settings
-        self._last_token_usage = TokenUsage()
-
-    @property
-    def last_token_usage(self) -> TokenUsage:
-        return self._last_token_usage
 
     @classmethod
     def from_config(cls, config_path: Optional[str] = None) -> "LLMClient":
@@ -39,9 +34,9 @@ class LLMClient:
         top_k: int = 70,
         repetition_penalty: float = 1.07,
         do_sample: bool = False,
-    ) -> str:
+    ) -> GenerationResult:
         input_text = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-        result = self._provider.generate(
+        text = self._provider.generate(
             prompt=prompt,
             system_prompt=system_prompt,
             stop_words=stop_words,
@@ -49,8 +44,5 @@ class LLMClient:
             max_new_tokens=max_new_tokens if max_new_tokens is not None else self._settings.max_new_tokens,
             progress_label=progress_label,
         )
-        self._last_token_usage = TokenUsage(
-            tokens_in=approx_tokens(input_text),
-            tokens_out=approx_tokens(result),
-        )
-        return result
+        usage = TokenUsage(tokens_in=approx_tokens(input_text), tokens_out=approx_tokens(text))
+        return GenerationResult(text=text, usage=usage)

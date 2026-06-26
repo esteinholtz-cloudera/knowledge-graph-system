@@ -224,7 +224,7 @@ class EntityResolver:
                 max_new_tokens=1024,
                 temperature=0.1,
                 progress_label="entity resolution · llm",
-            )
+            ).text
             from src.extraction.json_utils import extract_json
             groups = extract_json(response, prefer="array")
             if not isinstance(groups, list):
@@ -275,7 +275,7 @@ class EntityResolver:
                 max_new_tokens=256,
                 temperature=0.0,
                 progress_label="entity resolution · confirm",
-            )
+            ).text
             from src.extraction.json_utils import extract_json
             decisions = extract_json(response, prefer="array")
             if isinstance(decisions, list):

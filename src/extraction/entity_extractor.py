@@ -7,6 +7,7 @@ from .llm_client import LLMClient
 from .prompt_builder import build_entity_prompts
 from .prompt_store import PromptStore
 from .prompts import ENTITY_EXTRACTION_SYSTEM_PROMPT, ENTITY_EXTRACTION_USER_PROMPT
+from .token_usage import Extracted
 
 if TYPE_CHECKING:
     from ..config.settings import DomainSettings, LLMSettings
@@ -37,12 +38,13 @@ class EntityExtractor:
         self._model_name = model_name
         self._prompt_store = prompt_store
 
-    def extract(self, text: str, progress_label: Optional[str] = None) -> List[Dict]:
+    def extract(self, text: str, progress_label: Optional[str] = None) -> Extracted:
         """
         Extract entities from text.
 
         Returns:
-            List of dicts with 'entity', 'type', and optionally 'context'.
+            Extracted: items are dicts with 'entity', 'type', and optionally
+            'context'; usage carries the call's approximate token counts.
         """
         if self._llm_cfg and self._domain:
             if self._prompt_store:
@@ -60,7 +62,7 @@ class EntityExtractor:
             system_prompt = ENTITY_EXTRACTION_SYSTEM_PROMPT
             user_prompt = ENTITY_EXTRACTION_USER_PROMPT.format(text=text)
 
-        response = self.llm_client.generate(
+        gen = self.llm_client.generate(
             prompt=user_prompt,
             system_prompt=system_prompt,
             stop_words=None,
@@ -69,7 +71,7 @@ class EntityExtractor:
             progress_label=progress_label,
         )
 
-        return self._parse(response)
+        return Extracted(self._parse(gen.text), gen.usage)
 
     def _parse(self, response: str) -> List[Dict]:
         data = extract_json(response, prefer="array")

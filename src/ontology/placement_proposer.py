@@ -68,7 +68,7 @@ class PlacementProposer:
                 max_new_tokens=512,
                 temperature=0.2,
                 progress_label="ontology · placement proposals",
-            )
+            ).text
         except Exception as e:
             logger.warning("LLM placement proposal failed: %s", e)
             return self._fallback(ontology_graph, n)
