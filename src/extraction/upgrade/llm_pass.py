@@ -45,7 +45,7 @@ class UpgradeLLMExtractor:
             max_new_tokens=self._max_new_tokens,
             temperature=0.1,
             progress_label=progress_label,
-        )
+        ).text
         return self._parse(response, source)
 
     @staticmethod

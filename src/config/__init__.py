@@ -1,7 +1,10 @@
 """Configuration loading."""
 from .settings import (
     AppSettings,
+    ConfigOverrideError,
     LLMSettings,
+    add_override_arg,
+    apply_cli_overrides,
     clear_cli_overrides,
     load_config,
     overrides_from_cli,
@@ -10,7 +13,10 @@ from .settings import (
 
 __all__ = [
     "AppSettings",
+    "ConfigOverrideError",
     "LLMSettings",
+    "add_override_arg",
+    "apply_cli_overrides",
     "clear_cli_overrides",
     "load_config",
     "overrides_from_cli",

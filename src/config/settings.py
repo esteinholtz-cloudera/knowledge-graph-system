@@ -1,11 +1,12 @@
 """Load application settings from config.yaml."""
+import argparse
 import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Literal, List, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 _cli_overrides: Optional[dict] = None
 
@@ -319,3 +320,40 @@ def load_config(
     if merged_overrides:
         data = _deep_merge(data, merged_overrides)
     return AppSettings.model_validate(data)
+
+
+class ConfigOverrideError(ValueError):
+    """A -c/--set override was malformed or produced invalid configuration."""
+
+
+def add_override_arg(parser: argparse.ArgumentParser) -> None:
+    """Register the shared -c/--set config override flag on an argument parser."""
+    parser.add_argument(
+        "-c",
+        "--set",
+        action="append",
+        dest="config_set",
+        metavar="KEY=VALUE",
+        default=[],
+        help=(
+            "Override config.yaml (dotted keys, e.g. llm.temperature=0.5). "
+            "Repeatable; values: true/false/null, numbers, JSON, or strings."
+        ),
+    )
+
+
+def apply_cli_overrides(config_set: List[str], config_path: Optional[str] = None) -> None:
+    """Validate and install -c/--set overrides for subsequent load_config() calls.
+
+    Raises ConfigOverrideError if a pair is malformed or yields invalid config.
+    """
+    clear_cli_overrides()
+    if not config_set:
+        return
+    try:
+        set_cli_overrides(overrides_from_cli(config_set))
+        load_config(config_path)
+    except ValidationError as e:
+        raise ConfigOverrideError(f"Invalid config override: {e}") from e
+    except ValueError as e:
+        raise ConfigOverrideError(str(e)) from e

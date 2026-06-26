@@ -12,6 +12,7 @@ from .prompts import (
     RELATIONSHIP_EXTRACTION_SYSTEM_PROMPT,
     RELATIONSHIP_EXTRACTION_USER_PROMPT,
 )
+from .token_usage import Extracted
 
 if TYPE_CHECKING:
     from ..config.settings import DomainSettings, LLMSettings
@@ -43,12 +44,14 @@ class RelationshipExtractor:
         text: str,
         entities: Optional[List[str]] = None,
         progress_label: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> Extracted:
         """
         Extract relationships from text.
 
         Returns:
-            List of dicts with 'subject', 'predicate', 'object'.
+            Extracted: items are dicts with 'subject', 'predicate', 'object'
+            (plus optional 'scope'/'strength'); usage carries the call's
+            approximate token counts.
         """
         if entities:
             entity_list = ", ".join(entities[:20])
@@ -71,7 +74,7 @@ class RelationshipExtractor:
                 user_prompt = RELATIONSHIP_EXTRACTION_USER_PROMPT.format(
                     text=text, entities=entity_list
                 )
-            response = self.llm_client.generate(
+            gen = self.llm_client.generate(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 stop_words=None,
@@ -79,10 +82,10 @@ class RelationshipExtractor:
                 temperature=0.3,
                 progress_label=progress_label,
             )
-            return self._parse_triples(response)
+            return Extracted(self._parse_triples(gen.text), gen.usage)
         else:
             user_prompt = COMBINED_EXTRACTION_USER_PROMPT.format(text=text)
-            response = self.llm_client.generate(
+            gen = self.llm_client.generate(
                 prompt=user_prompt,
                 system_prompt=COMBINED_EXTRACTION_SYSTEM_PROMPT,
                 stop_words=None,
@@ -90,7 +93,7 @@ class RelationshipExtractor:
                 temperature=0.3,
                 progress_label=progress_label,
             )
-            return self._parse_combined(response)
+            return Extracted(self._parse_combined(gen.text), gen.usage)
 
     def _parse_triples(self, response: str) -> List[Dict]:
         data = extract_json(response, prefer="array")

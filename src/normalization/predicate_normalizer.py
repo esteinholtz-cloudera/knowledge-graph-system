@@ -114,7 +114,7 @@ def _llm_map_cluster(cluster: List[str], llm_client) -> Tuple[str, str]:
     try:
         from ..extraction.json_utils import extract_json
         response = llm_client.generate(prompt=prompt, system_prompt=None,
-                                       max_new_tokens=64, temperature=0.0)
+                                       max_new_tokens=64, temperature=0.0).text
         data = extract_json(response, prefer="object")
         if isinstance(data, dict) and data.get("canonical"):
             return str(data["canonical"]).strip(), str(data.get("reason", ""))

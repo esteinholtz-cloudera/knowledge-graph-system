@@ -23,7 +23,7 @@ def extract_entities(text: str) -> dict:
         Dictionary with extracted entities
     """
     extractor = EntityExtractor()
-    entities = extractor.extract(text)
+    entities = extractor.extract(text).items
     
     return {
         'entities': entities,
@@ -52,7 +52,7 @@ def extract_relationships(text: str, entities: list = None) -> dict:
         else:
             entity_names = entities
     
-    triples = extractor.extract(text, entity_names)
+    triples = extractor.extract(text, entity_names).items
     
     return {
         'triples': triples,

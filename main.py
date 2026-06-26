@@ -22,14 +22,12 @@ from src.cli.formatters import (
     print_pipeline_summary,
     print_precheck,
 )
-from pydantic import ValidationError
-
 from src.config.settings import (
+    ConfigOverrideError,
     DomainSettings,
-    clear_cli_overrides,
+    add_override_arg,
+    apply_cli_overrides,
     load_config,
-    overrides_from_cli,
-    set_cli_overrides,
 )
 from src.extraction.entity_extractor import ExtractionError
 from src.extraction.prompt_store import FALLBACK_MODEL, PromptStore
@@ -107,33 +105,9 @@ def _run_upgrade(args) -> None:
     )
 
 
-def _apply_cli_config_overrides(config_sets: list[str]) -> None:
-    clear_cli_overrides()
-    if not config_sets:
-        return
-    try:
-        set_cli_overrides(overrides_from_cli(config_sets))
-        load_config(str(_PROJECT_ROOT / "config" / "config.yaml"))
-    except ValueError as e:
-        raise SystemExit(str(e)) from e
-    except ValidationError as e:
-        raise SystemExit(f"Invalid config override: {e}") from e
-
-
 def main():
     parent = argparse.ArgumentParser(add_help=False)
-    parent.add_argument(
-        "-c",
-        "--set",
-        action="append",
-        dest="config_set",
-        metavar="KEY=VALUE",
-        default=[],
-        help=(
-            "Override config.yaml (dotted keys, e.g. llm.temperature=0.5). "
-            "Repeatable; values: true/false/null, numbers, JSON, or strings."
-        ),
-    )
+    add_override_arg(parent)
 
     parser = argparse.ArgumentParser(
         description="Knowledge Graph System",
@@ -232,7 +206,10 @@ def main():
     up_ext.add_argument("--output", default="data/knowledge_graphs/upgrade.ttl")
 
     args = parser.parse_args()
-    _apply_cli_config_overrides(args.config_set)
+    try:
+        apply_cli_overrides(args.config_set, str(_PROJECT_ROOT / "config" / "config.yaml"))
+    except ConfigOverrideError as e:
+        raise SystemExit(str(e)) from e
 
     if args.command == "process":
         if not print_precheck(HealthService().check()):
